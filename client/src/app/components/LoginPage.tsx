@@ -1,54 +1,68 @@
-import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router';
 import { useLocation } from '../hooks/useLocation';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card } from './ui/card';
 import { motion } from 'motion/react';
-import { UtensilsCrossed } from 'lucide-react';
+import { UtensilsCrossed, Home } from 'lucide-react';
 import api from '../api/axios';
 import { toast } from 'sonner';
+import { AlertCircle } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { detectLocation } = useLocation();
-  const [searchParams] = useSearchParams();
-  const roleFromUrl = searchParams.get('role') as 'provider' | 'receiver' | null;
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState<'provider' | 'receiver'>(roleFromUrl || 'receiver');
+  const [error, setError] = useState('');
+
+  // Auto-suggest @gmail.com when typing a name without '@'
+  const emailSuggestion = useMemo(() => {
+    if (email && !email.includes('@') && email.trim().length > 0) {
+      return `${email}@gmail.com`;
+    }
+    return '';
+  }, [email]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     try {
       console.log('Logging in with email:', email);
       const res = await api.post('/auth/login', { email, password });
       console.log('Login response:', res.data);
-      
+
       const token = res.data.token;
       const user = res.data.user;
-      
+
       if (!token) {
         throw new Error('No token in response');
       }
-      
-      localStorage.setItem('token', token);
-      console.log('✓ Token stored in localStorage');
-      
-      localStorage.setItem('user', JSON.stringify({ id: user._id || user.id, name: user.name, role: user.role }));
-      console.log('✓ User info stored in localStorage');
-      
-      if (selectedRole === 'receiver' || selectedRole === 'provider') {
-        detectLocation(true);
-      }
-      
+
+      const role = user.role || 'receiver';
+      login({ id: user._id || user.id, name: user.name, role }, token);
+      console.log('✓ User info stored in AuthContext');
+
+      detectLocation(true);
+
       toast.success('Login successful!');
-      navigate(selectedRole === 'provider' ? '/provider' : '/receiver');
-    } catch (err) {
+      navigate(role === 'provider' ? '/provider' : '/receiver');
+    } catch (err: any) {
       console.error('Login error:', err);
-      const errorMsg = err instanceof Error ? err.message : 'Login failed';
-      toast.error('Login failed', { description: errorMsg });
+      // Give a more user friendly inline error
+      const errorMsg = err?.response?.data?.message || err.message || 'Login failed';
+
+      if (errorMsg.includes('Invalid') || errorMsg.includes('password') || errorMsg.includes('email') || err.response?.status === 400 || err.response?.status === 401) {
+        setError('This email or password is incorrect. Please try again.');
+      } else {
+        setError(errorMsg);
+      }
+
+      toast.error('Login failed');
     }
   };
 
@@ -60,7 +74,24 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-background">
+    <div className="min-h-screen flex flex-col md:flex-row bg-background relative">
+      {/* Top-right Home link */}
+      <motion.button
+        type="button"
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2, type: "spring", stiffness: 200, damping: 20 }}
+        whileHover={{ scale: 1.05, y: -2 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => navigate('/')}
+        className="absolute top-6 right-6 z-50 flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-white/40 dark:bg-slate-900/40 backdrop-blur-xl border border-white/60 dark:border-slate-700/50 shadow-2xl shadow-green-900/10 hover:bg-white/80 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:text-green-700 transition-colors font-bold overflow-hidden group"
+      >
+        {/* Shimmer effect */}
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 dark:via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out" />
+        <Home className="w-5 h-5 text-green-600 dark:text-green-400 group-hover:scale-110 transition-transform duration-300" />
+        <span className="relative z-10 tracking-wide pr-1">Return Home</span>
+      </motion.button>
+
       {/* Left Side: Branding & Info (Hidden on small screens) */}
       <div className="hidden md:flex md:w-1/2 bg-green-600 text-white p-12 flex-col justify-between relative overflow-hidden">
         <div className="relative z-10">
@@ -119,17 +150,49 @@ export function LoginPage() {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl flex items-start gap-3 text-red-600 dark:text-red-400"
+              >
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <p className="text-sm font-medium">{error}</p>
+              </motion.div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="your@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="h-12"
-              />
+              <div className="relative">
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="your@email.com"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setError('');
+                  }}
+                  onKeyDown={(e) => {
+                    if ((e.key === 'Tab' || e.key === 'ArrowRight') && emailSuggestion) {
+                      e.preventDefault();
+                      setEmail(emailSuggestion);
+                    }
+                  }}
+                  required
+                  className="h-12"
+                  autoComplete="off"
+                />
+                {emailSuggestion && email && !email.includes('@') && (
+                  <div className="absolute inset-0 flex items-center pointer-events-none px-3 h-12">
+                    <span className="invisible">{email}</span>
+                    <span className="text-muted-foreground/40 select-none">@gmail.com</span>
+                  </div>
+                )}
+              </div>
+              {email && !email.includes('@') && (
+                <p className="text-[11px] text-muted-foreground/60 mt-1 ml-1">Press <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono border border-muted-foreground/20">Tab</kbd> to complete @gmail.com</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -139,32 +202,13 @@ export function LoginPage() {
                 type="password"
                 placeholder="••••••••"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setError('');
+                }}
                 required
                 className="h-12"
               />
-            </div>
-
-            <div className="space-y-4">
-              <Label>Select Your Role</Label>
-              <div className="grid grid-cols-2 gap-4">
-                <Button
-                  type="button"
-                  variant={selectedRole === 'receiver' ? 'default' : 'outline'}
-                  className={selectedRole === 'receiver' ? 'bg-green-600' : ''}
-                  onClick={() => setSelectedRole('receiver')}
-                >
-                  Receiver
-                </Button>
-                <Button
-                  type="button"
-                  variant={selectedRole === 'provider' ? 'default' : 'outline'}
-                  className={selectedRole === 'provider' ? 'bg-green-600' : ''}
-                  onClick={() => setSelectedRole('provider')}
-                >
-                  Provider
-                </Button>
-              </div>
             </div>
 
             <Button type="submit" className="w-full h-12 bg-green-600 hover:bg-green-700 text-base font-semibold transition-all">

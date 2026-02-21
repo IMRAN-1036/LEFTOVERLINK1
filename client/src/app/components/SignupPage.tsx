@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useLocation } from '../hooks/useLocation';
 import { Button } from './ui/button';
@@ -6,7 +6,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card } from './ui/card';
 import { motion } from 'motion/react';
-import { UtensilsCrossed, User, Store, ShieldCheck, Heart, Leaf } from 'lucide-react';
+import { UtensilsCrossed, User, Store, ShieldCheck, Heart, Leaf, Home, AlertCircle } from 'lucide-react';
 import api from '../api/axios';
 import { toast } from 'sonner';
 
@@ -22,12 +22,22 @@ export function SignupPage() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+
+  // Auto-suggest @gmail.com when typing a name without '@'
+  const emailSuggestion = useMemo(() => {
+    if (email && !email.includes('@') && email.trim().length > 0) {
+      return `${email}@gmail.com`;
+    }
+    return '';
+  }, [email]);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     try {
       if (password !== confirmPassword) {
-        toast.error('Passwords do not match');
+        setError('Passwords do not match.');
         return;
       }
 
@@ -43,15 +53,41 @@ export function SignupPage() {
       toast.success('Account created successfully!');
       // Redirect to login page
       navigate(`/login?role=${role}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Signup error:', err);
-      const errorMsg = err instanceof Error ? err.message : 'Signup failed';
-      toast.error('Signup failed', { description: errorMsg });
+      const status = err?.response?.status;
+      const serverMsg = err?.response?.data?.message || err?.response?.data?.error?.message || '';
+
+      if (status === 409 || serverMsg.toLowerCase().includes('already in use')) {
+        setError('This email is already registered. Please sign in instead.');
+      } else if (serverMsg) {
+        setError(serverMsg);
+      } else {
+        setError(err instanceof Error ? err.message : 'Signup failed. Please try again.');
+      }
+
+      toast.error('Signup failed');
     }
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col md:flex-row">
+    <div className="min-h-screen bg-background flex flex-col md:flex-row relative">
+      {/* Top-right Home link */}
+      <motion.button
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2, type: "spring", stiffness: 200, damping: 20 }}
+        whileHover={{ scale: 1.05, y: -2 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => navigate('/')}
+        className="absolute top-6 right-6 z-50 flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-white/40 dark:bg-slate-900/40 backdrop-blur-xl border border-white/60 dark:border-slate-700/50 shadow-2xl shadow-green-900/10 hover:bg-white/80 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:text-green-700 transition-colors font-bold overflow-hidden group"
+      >
+        {/* Shimmer effect */}
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 dark:via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out" />
+        <Home className="w-5 h-5 text-green-600 dark:text-green-400 group-hover:scale-110 transition-transform duration-300" />
+        <span className="relative z-10 tracking-wide pr-1">Return Home</span>
+      </motion.button>
+
       {/* Information Sidebar - Hidden on mobile */}
       <div className="hidden md:flex md:w-1/3 bg-green-600 text-white p-10 flex-col justify-between sticky top-0 h-screen overflow-hidden">
         <div className="relative z-10">
@@ -121,6 +157,16 @@ export function SignupPage() {
           </div>
 
           <form onSubmit={handleSignup} className="space-y-6">
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl flex items-start gap-3 text-red-600 dark:text-red-400"
+              >
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <p className="text-sm font-medium">{error}</p>
+              </motion.div>
+            )}
             {/* Role Selection */}
             <div className="space-y-3">
               <Label className="uppercase text-[10px] font-bold tracking-widest text-muted-foreground">Select your role</Label>
@@ -172,15 +218,36 @@ export function SignupPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="email">Email Address</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="john@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="h-11"
-                />
+                <div className="relative">
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="john@example.com"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if ((e.key === 'Tab' || e.key === 'ArrowRight') && emailSuggestion) {
+                        e.preventDefault();
+                        setEmail(emailSuggestion);
+                      }
+                    }}
+                    required
+                    className="h-11"
+                    autoComplete="off"
+                  />
+                  {emailSuggestion && email && !email.includes('@') && (
+                    <div className="absolute inset-0 flex items-center pointer-events-none px-3 h-11">
+                      <span className="invisible">{email}</span>
+                      <span className="text-muted-foreground/40 select-none">@gmail.com</span>
+                    </div>
+                  )}
+                </div>
+                {email && !email.includes('@') && (
+                  <p className="text-[11px] text-muted-foreground/60 mt-1 ml-1">Press <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono border border-muted-foreground/20">Tab</kbd> to complete @gmail.com</p>
+                )}
               </div>
 
               <div className="space-y-2">

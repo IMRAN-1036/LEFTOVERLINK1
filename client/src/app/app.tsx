@@ -5,6 +5,9 @@ import { SignupPage } from './components/SignupPage';
 import { LoginPage } from './components/LoginPage';
 import { ProviderDashboard } from './components/ProviderDashboard';
 import { ReceiverDashboard } from './components/ReceiverDashboard';
+import { MyOrdersPage } from './components/MyOrdersPage';
+import { ProviderOrdersPage } from './components/ProviderOrdersPage';
+import { ProviderRequestsPage } from './components/ProviderRequestsPage';
 import { PostFoodPage } from './components/PostFoodPage';
 import { MyListingsPage } from './components/MyListingsPage';
 import { PickupHistoryPage } from './components/PickupHistoryPage';
@@ -19,6 +22,8 @@ import { Toaster } from './components/ui/sonner';
 import { DonationPage } from './components/DonationPage';
 import { WalletPage } from './components/WalletPage';
 import { ProviderWalletPage } from './components/ProviderWalletPage';
+import { ProviderMapPage } from './components/ProviderMapPage';
+import { GlobalChatWidget } from './components/GlobalChatWidget';
 
 const DashboardRedirect = () => {
   const userStr = localStorage.getItem('user');
@@ -40,7 +45,11 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/dashboard" element={<DashboardRedirect />} />
             <Route path="/provider" element={<ProviderDashboard />} />
+            <Route path="/provider/map" element={<ProviderMapPage />} />
             <Route path="/receiver" element={<ReceiverDashboard />} />
+            <Route path="/my-orders" element={<MyOrdersPage />} />
+            <Route path="/provider-orders" element={<ProviderOrdersPage />} />
+            <Route path="/provider-requests" element={<ProviderRequestsPage />} />
             <Route path="/post-food" element={<PostFoodPage />} />
             <Route path="/my-listings" element={<MyListingsPage />} />
             <Route path="/history" element={<PickupHistoryPage />} />
@@ -57,6 +66,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Toaster position="top-right" />
+          <GlobalChatWidget />
         </div>
       </ThemeProvider>
     </Router>

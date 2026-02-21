@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation as useRouterLocation } from 'react-router';
+import { useLocation as useLocationHook } from '../hooks/useLocation';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
@@ -8,6 +9,7 @@ import {
     Plus,
     List,
     Bell,
+    ShoppingBag,
     User as UserIcon,
     LogOut,
     Clock,
@@ -15,7 +17,9 @@ import {
     Leaf,
     Trash2,
     CheckCircle,
-    Wallet
+    Wallet,
+    Map,
+    ClipboardList
 } from 'lucide-react';
 import { getTimeLeft } from '../mockData';
 import { motion, AnimatePresence } from 'motion/react';
@@ -25,6 +29,7 @@ import { ProviderWallet } from '../types';
 import api from '../api/axios';
 import { InsightBanner } from '../features/insights/InsightBanner';
 import { getProviderInsights } from '../shared/ai/insightEngine';
+import { useAuth } from '../context/AuthContext';
 
 export function ProviderDashboard() {
     const navigate = useNavigate();
@@ -56,26 +61,26 @@ export function ProviderDashboard() {
                 expiryTime: new Date(f.expiry || f.expiryTime || f.postedAt),
                 views: f.views || 0,
                 interested: f.interested || 0,
-                reservedBy: f.reservedBy
+                reservedBy: f.reservedBy,
+                location: f.location || { lat: 0, lng: 0, address: 'Unknown' }
             }));
             setListings(myListings);
         } catch (err) {
             console.error(err);
         }
     };
+    const { user, logout, isLoading } = useAuth();
 
     useEffect(() => {
-        const userStr = localStorage.getItem('user');
-        if (userStr) {
-            const user = JSON.parse(userStr);
-            if (user.role !== 'provider') {
+        if (!isLoading) {
+            if (!user) {
+                navigate('/login');
+            } else if (user.role !== 'provider') {
                 navigate('/receiver');
+            } else {
+                fetchData();
             }
-        } else {
-            navigate('/login');
         }
-
-        fetchData();
 
         // Listen for cross-tab/local updates so new posts show up
         const onStorage = (e: StorageEvent) => {
@@ -96,7 +101,7 @@ export function ProviderDashboard() {
             try {
                 // replace state without refresh flag
                 history.replaceState({ ...history.state, state: { ...(history.state && history.state.state), refresh: false } }, '');
-            } catch (e) {}
+            } catch (e) { }
         }
     }, [location]);
 
@@ -107,8 +112,7 @@ export function ProviderDashboard() {
     const [listings, setListings] = useState<any[]>([]);
 
     const handleLogout = () => {
-        localStorage.removeItem('user');
-        navigate('/login');
+        logout();
     };
 
     const removeListing = async (id: string) => {
@@ -129,12 +133,41 @@ export function ProviderDashboard() {
     return (
         <div className="min-h-screen bg-background flex flex-col">
             <header className="bg-background border-b px-4 py-3 sticky top-0 z-10">
-                <div className="container mx-auto flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-green-600 font-bold text-xl cursor-pointer" onClick={() => navigate('/')}>
+                <div className="container mx-auto flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 text-green-600 font-bold text-xl cursor-pointer shrink-0" onClick={() => navigate('/')}>
                         <UtensilsCrossed className="w-8 h-8" />
-                        <span>LeftOverLink <Badge variant="outline" className="ml-2 text-xs">Provider</Badge></span>
+                        <span className="hidden sm:inline">LeftOverLink <Badge variant="outline" className="ml-2 text-xs">Provider</Badge></span>
                     </div>
-                    <div className="flex items-center gap-2">
+
+                    <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => navigate('/provider/map')}
+                        className="mx-auto flex items-center gap-2.5 rounded-full bg-gradient-to-r from-green-500 via-emerald-600 to-green-600 px-6 py-2.5 font-bold text-white shadow-xl shadow-green-600/30 transition-shadow hover:shadow-2xl hover:shadow-green-500/50 backdrop-blur-sm border border-white/20 relative overflow-hidden group"
+                    >
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out" />
+                        <Map className="h-5 w-5 drop-shadow-sm group-hover:rotate-12 transition-transform duration-300" />
+                        <span className="tracking-wide drop-shadow-sm">View Map</span>
+                        <div className="absolute inset-0 rounded-full border border-white/0 group-hover:border-white/40 transition-colors duration-300" />
+                    </motion.button>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                            variant="outline"
+                            className="bg-green-50 text-green-600 border-green-200 hover:bg-green-100 font-bold gap-2 px-3 h-9"
+                            onClick={() => navigate('/provider-orders')}
+                        >
+                            <ShoppingBag className="w-4 h-4" />
+                            <span className="hidden sm:inline">Shared Food</span>
+                        </Button>
+                        <Button
+                            variant="outline"
+                            className="bg-green-50 text-green-600 border-green-200 hover:bg-green-100 font-bold gap-2 px-3 h-9"
+                            onClick={() => navigate('/provider-requests')}
+                        >
+                            <ClipboardList className="w-4 h-4" />
+                            <span className="hidden sm:inline">Requests</span>
+                        </Button>
                         <Button
                             variant="outline"
                             className="bg-green-50 text-green-600 border-green-200 hover:bg-green-100 font-bold gap-2 px-3 h-9"
@@ -235,18 +268,27 @@ export function ProviderDashboard() {
                                                         </Badge>
                                                     </div>
 
-                                                    <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                                                        <div className="flex items-center gap-1">
-                                                            <Users className="w-4 h-4" />
-                                                            <span>Feeds ~{item.quantity}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-1">
-                                                            <Clock className="w-4 h-4" />
-                                                            <span>Expires in {getTimeLeft(item.expiryTime)}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-1">
-                                                            <span className="font-medium text-green-600">👁️ {item.views} views</span>
-                                                        </div>
+                                                    <div className="flex flex-wrap gap-3 text-sm mt-3">
+                                                        <Badge variant="outline" className="flex items-center gap-1.5 px-3 py-1 border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400 font-bold rounded-full shadow-sm">
+                                                            <Users className="w-3.5 h-3.5" />
+                                                            Feeds {item.quantity}+ People
+                                                        </Badge>
+
+                                                        {getTimeLeft(item.expiryTime) === 'Expired' || new Date(item.expiryTime) < new Date() ? (
+                                                            <Badge variant="destructive" className="flex items-center gap-1.5 px-3 py-1 font-bold rounded-full shadow-sm animate-pulse">
+                                                                <Clock className="w-3.5 h-3.5" />
+                                                                Expired
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1 bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/50 dark:text-orange-400 font-semibold rounded-full shadow-sm">
+                                                                <Clock className="w-3.5 h-3.5" />
+                                                                {getTimeLeft(item.expiryTime)}
+                                                            </Badge>
+                                                        )}
+
+                                                        <Badge variant="outline" className="flex items-center gap-1.5 px-3 py-1 border-blue-200 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-400 font-bold rounded-full shadow-sm">
+                                                            {item.views || 0} Views
+                                                        </Badge>
                                                     </div>
 
                                                     {item.reservedBy && (

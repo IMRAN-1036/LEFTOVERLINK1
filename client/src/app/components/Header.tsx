@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { UtensilsCrossed, Menu, X, Heart } from 'lucide-react';
 import { cn } from './ui/utils';
+import { useAuth } from '../context/AuthContext';
 
 export function Header() {
     const navigate = useNavigate();
+    const location = useLocation();
+    const { user } = useAuth();
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -66,7 +69,7 @@ export function Header() {
 
                 {/* Desktop Navigation */}
                 <nav className="hidden md:flex items-center gap-8">
-                    {navLinks.map((link) => (
+                    {location.pathname === '/' && navLinks.map((link) => (
                         <a
                             key={link.name}
                             href={link.href}
@@ -89,13 +92,24 @@ export function Header() {
                         <Heart className="w-4 h-4" />
                         Donate Now
                     </Button>
-                    {localStorage.getItem('user') ? (
-                        <Button
-                            className="bg-green-600 hover:bg-green-700 text-white rounded-full px-6"
-                            onClick={() => navigate('/signup')}
-                        >
-                            Get Started
-                        </Button>
+                    {user ? (
+                        <div className="flex items-center gap-3">
+                            {(user.role === 'receiver' || user.role === 'provider') && (
+                                <Button
+                                    variant="outline"
+                                    className="rounded-full px-5 border-green-600/30 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30 flex items-center gap-2 font-semibold"
+                                    onClick={() => navigate(user.role === 'provider' ? '/provider-orders' : '/my-orders')}
+                                >
+                                    {user.role === 'provider' ? 'Shared Food' : 'My Orders'}
+                                </Button>
+                            )}
+                            <Button
+                                className="bg-green-600 hover:bg-green-700 text-white rounded-full px-6 shadow-sm"
+                                onClick={() => navigate(user.role === 'provider' ? '/provider' : '/receiver')}
+                            >
+                                Dashboard
+                            </Button>
+                        </div>
                     ) : (
                         <>
                             <Button
@@ -134,7 +148,7 @@ export function Header() {
                         className="md:hidden bg-background border-b overflow-hidden"
                     >
                         <div className="container mx-auto px-4 py-6 flex flex-col gap-4">
-                            {navLinks.map((link) => (
+                            {location.pathname === '/' && navLinks.map((link) => (
                                 <a
                                     key={link.name}
                                     href={link.href}
@@ -156,16 +170,30 @@ export function Header() {
                                 Donate Now
                             </Button>
                             <div className="flex flex-col gap-3 pt-2">
-                                {localStorage.getItem('user') ? (
-                                    <Button
-                                        className="w-full justify-center bg-green-600 hover:bg-green-700 text-white"
-                                        onClick={() => {
-                                            navigate('/signup');
-                                            setIsMobileMenuOpen(false);
-                                        }}
-                                    >
-                                        Get Started
-                                    </Button>
+                                {user ? (
+                                    <>
+                                        {(user.role === 'receiver' || user.role === 'provider') && (
+                                            <Button
+                                                variant="outline"
+                                                className="w-full justify-center border-green-600/30 text-green-700 dark:text-green-400 mb-2"
+                                                onClick={() => {
+                                                    navigate(user.role === 'provider' ? '/provider-orders' : '/my-orders');
+                                                    setIsMobileMenuOpen(false);
+                                                }}
+                                            >
+                                                {user.role === 'provider' ? 'Shared Food' : 'My Orders'}
+                                            </Button>
+                                        )}
+                                        <Button
+                                            className="w-full justify-center bg-green-600 hover:bg-green-700 text-white shadow-sm"
+                                            onClick={() => {
+                                                navigate(user.role === 'provider' ? '/provider' : '/receiver');
+                                                setIsMobileMenuOpen(false);
+                                            }}
+                                        >
+                                            Dashboard
+                                        </Button>
+                                    </>
                                 ) : (
                                     <>
                                         <Button

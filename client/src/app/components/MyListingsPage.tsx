@@ -219,21 +219,28 @@ export function MyListingsPage() {
                       </div>
 
                       {/* Stats */}
-                      <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                        <div className="flex items-center gap-1">
-                          <Users className="w-4 h-4" />
-                          <span>Feeds ~{listing.quantity}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Clock className="w-4 h-4" />
-                          <span>{getTimeLeft(listing.expiryTime)}</span>
-                        </div>
-                        <div>
-                          <span>👁️ {listing.views} views</span>
-                        </div>
-                        <div>
-                          <span>❤️ {listing.interestedCount} interested</span>
-                        </div>
+                      <div className="flex flex-wrap gap-3 text-sm mt-3">
+                        <Badge variant="outline" className="flex items-center gap-1.5 px-3 py-1 border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400 font-bold rounded-full shadow-sm">
+                          <Users className="w-3.5 h-3.5" />
+                          Feeds {listing.quantity}+ People
+                        </Badge>
+
+                        {getTimeLeft(listing.expiryTime) === 'Expired' || new Date(listing.expiryTime) < new Date() ? (
+                          <Badge variant="destructive" className="flex items-center gap-1.5 px-3 py-1 font-bold rounded-full shadow-sm animate-pulse">
+                            <Clock className="w-3.5 h-3.5" />
+                            Expired
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1 bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/50 dark:text-orange-400 font-semibold rounded-full shadow-sm">
+                            <Clock className="w-3.5 h-3.5" />
+                            {getTimeLeft(listing.expiryTime)} left
+                          </Badge>
+                        )}
+
+                        <Badge variant="outline" className="flex items-center gap-1.5 px-3 py-1 border-blue-200 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-400 font-bold rounded-full shadow-sm">
+                          <span className="text-base leading-none">🔥</span>
+                          {listing.views || 0} Views
+                        </Badge>
                       </div>
 
                       {/* Reserved By */}

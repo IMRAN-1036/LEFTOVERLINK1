@@ -27,6 +27,12 @@ const register = async (req, res, next) => {
         error: { message: "Validation failed", details: err.errors },
       });
     }
+    if (err.status === 409) {
+      return res.status(409).json({
+        success: false,
+        message: "Email already in use",
+      });
+    }
     return next(err);
   }
 };

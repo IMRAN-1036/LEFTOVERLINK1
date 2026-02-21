@@ -6,7 +6,10 @@ const createFood = async ({ title, description, quantity, expiry, location, prov
     description,
     quantity,
     expiry,
-    location,
+    location: {
+      type: 'Point',
+      coordinates: [location.lng, location.lat]
+    },
     provider: providerId,
   });
 
@@ -34,16 +37,17 @@ const incrementViews = async (id) => {
 };
 
 const claimFood = async ({ id, receiverId }) => {
-  const food = await Food.findById(id);
-  if (!food || food.status !== "available") {
-    const err = new Error("Food is not available");
+  const food = await Food.findOneAndUpdate(
+    { _id: id, status: "available" },
+    { $set: { status: "claimed", claimedBy: receiverId } },
+    { new: true }
+  );
+
+  if (!food) {
+    const err = new Error("Food not found or already claimed");
     err.status = 400;
     throw err;
   }
-
-  food.status = "claimed";
-  food.claimedBy = receiverId;
-  await food.save();
 
   return food;
 };

@@ -12,6 +12,8 @@ import { useLocation } from '../hooks/useLocation';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProviderWallet, WalletTransaction, FoodPost } from '../types';
 import api from '../api/axios';
+import { FoodMap } from '../features/map/FoodMap';
+import { AddressAutocomplete, LocationResult } from './AddressAutocomplete';
 
 export function PostFoodPage() {
   const navigate = useNavigate();
@@ -117,7 +119,7 @@ export function PostFoodPage() {
           lng: newPost.location.lng,
         },
       };
-      
+
       console.log('Posting food with payload:', payload);
       const response = await api.post('/food', payload);
       console.log('Food posted successfully:', response.data);
@@ -371,16 +373,17 @@ export function PostFoodPage() {
 
                     <div className="space-y-4">
                       <div className="relative group">
-                        <div className="absolute left-4 top-4 text-muted-foreground group-focus-within:text-green-600 transition-colors">
-                          <MapPin className="w-5 h-5" />
-                        </div>
-                        <Input
-                          id="address"
-                          value={address}
-                          onChange={(e) => setAddress(e.target.value)}
-                          placeholder="Enter street, landmark, or apartment..."
-                          className="h-14 pl-12 text-lg rounded-xl border-2 focus:border-green-600 transition-all"
-                          required
+                        <AddressAutocomplete
+                          defaultValue={address}
+                          onSelect={(loc: LocationResult) => {
+                            setAddress(loc.display_name);
+                            setDetectedLocation({
+                              lat: loc.lat,
+                              lng: loc.lon,
+                              address: loc.display_name
+                            });
+                          }}
+                          placeholder="Search for street, landmark, or area..."
                         />
                       </div>
 
@@ -402,15 +405,40 @@ export function PostFoodPage() {
                       </Button>
 
                       {detectedLocation && (
-                        <div className="p-4 bg-muted/30 rounded-xl border flex items-start gap-3">
-                          <div className="p-2 bg-green-600 text-white rounded-lg">
-                            <Check className="w-4 h-4" />
+                        <>
+                          <div className="p-4 bg-muted/30 rounded-xl border flex items-start gap-3">
+                            <div className="p-2 bg-green-600 text-white rounded-lg">
+                              <Check className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+                                Address Verified
+                              </p>
+                              <p className="text-sm font-medium">{detectedLocation.address}</p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Address Verified</p>
-                            <p className="text-sm font-medium">{detectedLocation.address}</p>
-                          </div>
-                        </div>
+
+                          <FoodMap
+                            centerLat={detectedLocation.lat}
+                            centerLng={detectedLocation.lng}
+                            posts={[
+                              {
+                                id: "preview",
+                                foodType:
+                                  description.substring(0, 30) +
+                                  (description.length > 30 ? "..." : "") ||
+                                  "Surplus food",
+                                providerName: "Your pickup point",
+                                location: {
+                                  lat: detectedLocation.lat,
+                                  lng: detectedLocation.lng,
+                                  address: detectedLocation.address,
+                                },
+                                distance: null,
+                              },
+                            ]}
+                          />
+                        </>
                       )}
                     </div>
 

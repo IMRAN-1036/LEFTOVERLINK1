@@ -39,13 +39,14 @@ export interface FoodPost {
   dietaryType: DietaryType;
   quantity: number; // feeds X people
   description?: string;
-  expiryTime: Date;
+  expiryTime: Date | number;
   location: {
     lat: number;
     lng: number;
     address: string;
     hideExact?: boolean;
   };
+  distance?: number;
   status: FoodStatus;
   imageUrl?: string;
   postedAt: Date;

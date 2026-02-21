@@ -3,9 +3,12 @@ import { Button } from './ui/button';
 import { motion } from 'motion/react';
 import { UtensilsCrossed, Heart, Users, TrendingDown } from 'lucide-react';
 import { Header } from './Header';
+import { LiveHeatmap } from '../features/map/LiveHeatmap';
+import { useAuth } from '../context/AuthContext';
 
 export function LandingPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
@@ -71,33 +74,47 @@ export function LandingPage() {
           </div>
 
           {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Button
-              size="lg"
-              className="bg-green-600 hover:bg-green-700 text-white px-8 py-6 text-lg"
-              onClick={() => navigate('/signup?role=provider')}
-            >
-              I Have Food to Share
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="border-green-600 text-green-600 hover:bg-green-50 px-8 py-6 text-lg"
-              onClick={() => navigate('/signup?role=receiver')}
-            >
-              I Need Food
-            </Button>
-          </div>
+          {user ? (
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              <Button
+                size="lg"
+                className="bg-green-600 hover:bg-green-700 text-white px-8 py-6 text-lg font-bold"
+                onClick={() => navigate(user.role === 'provider' ? '/provider' : '/receiver')}
+              >
+                Go to Dashboard
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                <Button
+                  size="lg"
+                  className="bg-green-600 hover:bg-green-700 text-white px-8 py-6 text-lg"
+                  onClick={() => navigate('/signup?role=provider')}
+                >
+                  I Have Food to Share
+                </Button>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="border-green-600 text-green-600 hover:bg-green-50 px-8 py-6 text-lg"
+                  onClick={() => navigate('/signup?role=receiver')}
+                >
+                  I Need Food
+                </Button>
+              </div>
 
-          <p className="mt-8 text-muted-foreground">
-            Already have an account?{' '}
-            <button
-              onClick={() => navigate('/login')}
-              className="text-green-600 font-bold hover:underline underline-offset-4"
-            >
-              Sign in
-            </button>
-          </p>
+              <p className="mt-8 text-muted-foreground">
+                Already have an account?{' '}
+                <button
+                  onClick={() => navigate('/login')}
+                  className="text-green-600 font-bold hover:underline underline-offset-4"
+                >
+                  Sign in
+                </button>
+              </p>
+            </>
+          )}
         </motion.div>
 
         {/* How It Works Section */}
@@ -141,6 +158,27 @@ export function LandingPage() {
               </p>
             </div>
           </div>
+        </motion.div>
+
+        {/* Live Heatmap Section */}
+        <motion.div
+          id="heatmap"
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.8 }}
+          className="mt-32 max-w-6xl mx-auto"
+        >
+          <div className="text-center mb-10">
+            <h2 className="text-3xl md:text-5xl font-black mb-4">
+              Visualizing the <span className="text-green-600">Impact</span>
+            </h2>
+            <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+              Our live simulation tracks hotzones where surplus food is frequently wasted versus communities experiencing high demand.
+            </p>
+          </div>
+
+          <LiveHeatmap />
         </motion.div>
 
         {/* Donation Section */}

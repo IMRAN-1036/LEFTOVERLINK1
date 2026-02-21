@@ -14,19 +14,31 @@ export const useLocation = () => {
       );
       const data = await response.json();
 
-      const city =
-        data.address.city ||
-        data.address.town ||
-        data.address.village ||
-        data.address.suburb ||
-        "Unknown City";
-      const state = data.address.state || "Unknown State";
-      const country = data.address.country || "Unknown Country";
+      const addr = data.address || {};
 
-      return `${city}, ${state}, ${country}`;
+      // Try multiple address fields in order of “most city‑like”
+      let city =
+        addr.city ||
+        addr.town ||
+        addr.village ||
+        addr.suburb ||
+        addr.city_district ||
+        addr.county ||
+        "";
+
+      // Fallback: take the first part of display_name if we still don't have a city‑level name
+      if (!city && typeof data.display_name === "string") {
+        city = data.display_name.split(",")[0] || "";
+      }
+
+      const state = addr.state || "";
+      const country = addr.country || "";
+
+      // Build a clean string without hard‑coded “Unknown …” labels
+      return [city, state, country].filter(Boolean).join(", ");
     } catch (error) {
       console.error("Error reverse geocoding:", error);
-      return "Location detected (Address unavailable)";
+      return "Location detected";
     }
   };
 

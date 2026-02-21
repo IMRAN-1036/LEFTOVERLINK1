@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Bell, Clock, MapPin, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
+import { Bell, Clock, MapPin, CheckCircle, AlertCircle, Trash2, X } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
@@ -39,7 +40,7 @@ export function NotificationsPage() {
     },
     {
       id: '3',
-      type: 'Act fast',
+      type: 'expiring',
       title: 'meal Alrert:Act fast!!!',
       message: 'Fresh food within 1km .pickup avaliable for the next 2 hours.',
       time: '1 hour ago',
@@ -156,15 +157,17 @@ export function NotificationsPage() {
       {/* Header */}
       <div className="bg-background border-b sticky top-0 z-10">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                size="sm"
+              <motion.button
+                whileHover={{ scale: 1.1, rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
                 onClick={() => navigate('/dashboard')}
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-red-50 text-red-500 hover:bg-red-500 hover:text-white hover:shadow-lg hover:shadow-red-500/30 transition-all duration-300 border border-red-100 group"
+                aria-label="Close Notifications"
               >
-                ← Back
-              </Button>
+                <X className="w-5 h-5 drop-shadow-sm group-hover:scale-110 transition-transform" />
+              </motion.button>
               <div className="flex items-center gap-2">
                 <Bell className="w-5 h-5" />
                 <h1 className="text-xl font-bold">Notifications</h1>

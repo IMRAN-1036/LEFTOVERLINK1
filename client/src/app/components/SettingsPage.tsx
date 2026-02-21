@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo, ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { useTheme } from 'next-themes';
 import { useLocation } from '../hooks/useLocation';
@@ -11,6 +11,8 @@ import {
 import { Button } from './ui/button';
 import { ChatWidget, ChatWidgetHandle } from './ChatWidget';
 import { Switch } from './ui/switch';
+import { useAuth } from '../context/AuthContext';
+import { useSettings } from '../context/SettingsContext';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
@@ -43,10 +45,86 @@ import {
 } from './ui/dialog';
 import { Textarea } from './ui/textarea';
 import { toast } from 'sonner';
+import { AddressAutocomplete } from './AddressAutocomplete';
+
+const SettingsSection = memo(({
+  icon: Icon,
+  title,
+  description,
+  children,
+  id,
+  activeSection,
+  onToggle
+}: {
+  icon: any;
+  title: any;
+  description?: any;
+  children: React.ReactNode | any;
+  id: string;
+  activeSection: string | null;
+  onToggle: (id: string) => void;
+}) => {
+  const isExpanded = activeSection === id;
+
+  return (
+    <Card className="p-4">
+      <button
+        onClick={() => onToggle(isExpanded ? '' : id)}
+        className="w-full flex items-center justify-between text-left"
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-green-500/10 rounded-lg">
+            <Icon className="w-5 h-5 text-green-600" />
+          </div>
+          <div>
+            <h3 className="font-medium">{title}</h3>
+            {description && (
+              <p className="text-sm text-gray-500">{description}</p>
+            )}
+          </div>
+        </div>
+        <ChevronRight className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+      </button>
+
+      {isExpanded && (
+        <div className="mt-4 space-y-4">
+          <Separator />
+          {children}
+        </div>
+      )}
+    </Card>
+  );
+});
+
+SettingsSection.displayName = 'SettingsSection';
+
+const SettingItem = memo(({
+  label,
+  description,
+  children
+}: {
+  label: string;
+  description?: string;
+  children: React.ReactNode | any;
+}) => (
+  <div className="flex items-center justify-between">
+    <div className="flex-1">
+      <Label className="text-sm font-medium">{label}</Label>
+      {description && (
+        <p className="text-xs text-gray-500 mt-1">{description}</p>
+      )}
+    </div>
+    <div>{children}</div>
+  </div>
+));
+
+SettingItem.displayName = 'SettingItem';
 
 export function SettingsPage() {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
+  const { user, updateUser, logout, token } = useAuth();
+  const { updateSettings } = useSettings();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [showReportDialog, setShowReportDialog] = useState(false);
@@ -64,54 +142,75 @@ export function SettingsPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // User settings state — load from storage or API
+  // User settings state — start empty, load from storage/API
   const [settings, setSettings] = useState<any>({
     name: '',
     email: '',
     phone: '',
-    role: 'receiver',
+    role: '',
     verified: false,
-    autoLocation: true,
-    alertRadius: '5',
-    nearbyAlerts: true,
-    expiryReminders: true,
-    pickupNotifications: true,
-    pushNotifications: true,
-    emailNotifications: false,
-    hideLocation: true,
-    ngoPriority: false,
-    reduceMotion: false,
-    address: 'Not detected',
-    lat: 0,
-    lng: 0,
     profileImage: '',
   });
 
   const { detectLocation, isDetecting } = useLocation();
 
-  // Load settings from localStorage
+  // Load settings from localStorage and API
   useEffect(() => {
-    const savedSettings = localStorage.getItem('userSettings');
-    if (savedSettings) {
-      setSettings(prev => ({ ...prev, ...JSON.parse(savedSettings) }));
-    }
-    // Try to load user profile from API
+    // First, try to load user profile from API
     (async () => {
       try {
-        const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+        if (!token) return;
+
+        const apiRoot = ((import.meta as any)?.env?.VITE_API_URL as string) || 'http://localhost:5001';
+        const res = await fetch(`${apiRoot}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         if (res.ok) {
           const user = await res.json();
-          setSettings(prev => ({ ...prev, name: user.name || prev.name, email: user.email || prev.email, role: user.role || prev.role }));
+          setSettings((prev: any) => ({
+            ...prev,
+            name: user.name || '',
+            email: user.email || '',
+            role: user.role || '',
+            verified: user.verified || false,
+          }));
         }
       } catch (err) {
         // ignore
       }
     })();
-  }, []);
 
-  // Save settings to localStorage
+    // Then load saved settings from localStorage (location preferences, etc.)
+    const savedSettings = localStorage.getItem('userSettings');
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        setSettings((prev: any) => ({
+          ...prev,
+          ...parsed,
+          // Don't override API-loaded user data unless localStorage has newer values
+          name: parsed.name || prev.name,
+          email: parsed.email || prev.email,
+          role: parsed.role || prev.role,
+        }));
+      } catch (e) {
+        console.error('Failed to parse userSettings:', e);
+      }
+    }
+
+    // Fallback: load role from user context if API didn't provide it
+    if (user) {
+      setSettings((prev: any) => ({
+        ...prev,
+        role: prev.role || user.role || '',
+        name: prev.name || user.name || '',
+      }));
+    }
+  }, [token, user]);
+
   const saveToStorage = (newSettings: any) => {
-    localStorage.setItem('userSettings', JSON.stringify(newSettings));
+    updateSettings(newSettings);
+    updateUser({ name: newSettings.name, role: newSettings.role });
   };
 
   const handleDetectLocation = async () => {
@@ -133,7 +232,7 @@ export function SettingsPage() {
 
   const handleLogout = () => {
     toast.success('Logged out successfully');
-    navigate('/');
+    logout();
   };
 
   const handleChatWithSupport = () => {
@@ -227,70 +326,9 @@ export function SettingsPage() {
     }
   };
 
-  const SettingsSection = ({
-    icon: Icon,
-    title,
-    description,
-    children,
-    id
-  }: {
-    icon: any;
-    title: any;
-    description?: any;
-    children: React.ReactNode;
-    id: string;
-  }) => {
-    const isExpanded = activeSection === id;
-
-    return (
-      <Card className="p-4">
-        <button
-          onClick={() => setActiveSection(isExpanded ? null : id)}
-          className="w-full flex items-center justify-between text-left"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/10 rounded-lg">
-              <Icon className="w-5 h-5 text-green-600" />
-            </div>
-            <div>
-              <h3 className="font-medium">{title}</h3>
-              {description && (
-                <p className="text-sm text-gray-500">{description}</p>
-              )}
-            </div>
-          </div>
-          <ChevronRight className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-        </button>
-
-        {isExpanded && (
-          <div className="mt-4 space-y-4">
-            <Separator />
-            {children}
-          </div>
-        )}
-      </Card>
-    );
-  };
-
-  const SettingItem = ({
-    label,
-    description,
-    children
-  }: {
-    label: string;
-    description?: string;
-    children: React.ReactNode;
-  }) => (
-    <div className="flex items-center justify-between">
-      <div className="flex-1">
-        <Label className="text-sm font-medium">{label}</Label>
-        {description && (
-          <p className="text-xs text-gray-500 mt-1">{description}</p>
-        )}
-      </div>
-      <div>{children}</div>
-    </div>
-  );
+  const handleToggleSection = useCallback((id: string) => {
+    setActiveSection((prev) => prev === id ? null : id);
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -341,13 +379,13 @@ export function SettingsPage() {
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold">{settings.name}</h2>
+                <h2 className="text-lg font-bold">{settings.name || 'User'}</h2>
                 {settings.verified && (
                   <CheckCircle className="w-5 h-5 text-blue-500" />
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">{settings.role}</p>
-              <p className="text-xs text-muted-foreground mt-1">{settings.email}</p>
+              <p className="text-sm text-muted-foreground">{settings.role || 'No role set'}</p>
+              <p className="text-xs text-muted-foreground mt-1">{settings.email || 'No email'}</p>
             </div>
           </div>
         </Card>
@@ -358,14 +396,19 @@ export function SettingsPage() {
           icon={User}
           title="Profile Settings"
           description="Manage your personal information"
+          activeSection={activeSection}
+          onToggle={handleToggleSection}
         >
           <div className="space-y-4">
             <div>
               <Label htmlFor="name">Full Name</Label>
               <Input
                 id="name"
-                value={settings.name}
-                onChange={(e) => setSettings({ ...settings, name: e.target.value })}
+                value={settings.name || ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSettings((prev: any) => ({ ...prev, name: value }));
+                }}
                 className="mt-1"
               />
             </div>
@@ -376,8 +419,11 @@ export function SettingsPage() {
                 <Input
                   id="email"
                   type="email"
-                  value={settings.email}
-                  onChange={(e) => setSettings({ ...settings, email: e.target.value })}
+                  value={settings.email || ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSettings((prev: any) => ({ ...prev, email: value }));
+                  }}
                   className="pl-10"
                 />
               </div>
@@ -389,8 +435,11 @@ export function SettingsPage() {
                 <Input
                   id="phone"
                   type="tel"
-                  value={settings.phone}
-                  onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
+                  value={settings.phone || ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSettings((prev: any) => ({ ...prev, phone: value }));
+                  }}
                   className="pl-10"
                 />
               </div>
@@ -398,18 +447,15 @@ export function SettingsPage() {
             <div>
               <Label>Role</Label>
               <Select
-                value={settings.role === 'Food Receiver' ? 'receiver' : settings.role === 'Food Provider' ? 'provider' : settings.role}
+                value={settings.role || ''}
                 onValueChange={(value) => {
                   const newSettings = { ...settings, role: value };
                   setSettings(newSettings);
                   saveToStorage(newSettings);
 
-                  // Update current user role in localStorage to trigger dashboard switch
-                  const userStr = localStorage.getItem('user');
-                  if (userStr) {
-                    const user = JSON.parse(userStr);
-                    user.role = value;
-                    localStorage.setItem('user', JSON.stringify(user));
+                  // Update current user role in context to trigger dashboard switch
+                  if (user) {
+                    updateUser({ role: value });
                   }
 
                   toast.success(`Role switched to ${value === 'provider' ? 'Provider' : 'Receiver'}`);
@@ -440,6 +486,8 @@ export function SettingsPage() {
           icon={MapPin}
           title="Location Settings"
           description="Manage how we use your location"
+          activeSection={activeSection}
+          onToggle={handleToggleSection}
         >
           <div className="space-y-4">
             <SettingItem
@@ -447,7 +495,7 @@ export function SettingsPage() {
               description="Automatically use your current location"
             >
               <Switch
-                checked={settings.autoLocation}
+                checked={settings.autoLocation ?? false}
                 onCheckedChange={(checked) => {
                   const newSettings = { ...settings, autoLocation: checked };
                   setSettings(newSettings);
@@ -479,39 +527,39 @@ export function SettingsPage() {
                 </Button>
               </div>
               <div className="text-sm font-bold text-foreground">
-                {settings.address}
+                {settings.address || 'No location set'}
               </div>
-              {settings.lat !== 0 && (
+              {settings.lat && settings.lng && settings.lat !== 0 && settings.lng !== 0 && (
                 <div className="text-[10px] text-muted-foreground mt-1 tabular-nums">
                   {settings.lat.toFixed(4)}°, {settings.lng.toFixed(4)}°
                 </div>
               )}
 
               <div className="mt-4">
-                <Label htmlFor="manualAddress" className="text-xs">Manual Location Override</Label>
-                <div className="flex gap-2 mt-1">
-                  <Input
-                    id="manualAddress"
-                    placeholder="Enter your city/region manually"
-                    value={settings.address === 'Not detected' ? '' : settings.address}
-                    onChange={(e) => {
-                      const newSettings = { ...settings, address: e.target.value };
+                <Label htmlFor="manualAddress" className="text-xs text-muted-foreground uppercase tracking-wider font-bold mb-2 block">Manual Location Search</Label>
+                <div className="relative group z-50">
+                  <AddressAutocomplete
+                    defaultValue={settings.address || ''}
+                    onSelect={(loc) => {
+                      const newSettings = {
+                        ...settings,
+                        autoLocation: false,
+                        address: loc.display_name,
+                        lat: loc.lat,
+                        lng: loc.lon,
+                      };
                       setSettings(newSettings);
-                      // Reset lat/lng if manually typing, unless we want to keep them (maybe risky)
+                      saveToStorage(newSettings);
+                      toast.success('Location updated successfully', {
+                        description: loc.display_name,
+                      });
                     }}
-                    className="h-8 text-xs"
+                    placeholder="Search for your street, city, or area..."
+                    className="w-full"
                   />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs"
-                    onClick={handleSave}
-                  >
-                    Save
-                  </Button>
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1 italic">
-                  Type your region if auto-detection fails or is inaccurate.
+                <p className="text-[10px] text-muted-foreground mt-2 italic">
+                  Search for your location if auto-detection fails or is inaccurate.
                 </p>
               </div>
             </div>
@@ -519,13 +567,15 @@ export function SettingsPage() {
             <div>
               <Label htmlFor="radius">Alert Radius</Label>
               <Select
-                value={settings.alertRadius}
-                onValueChange={(value) =>
-                  setSettings({ ...settings, alertRadius: value })
-                }
+                value={settings.alertRadius || '10'}
+                onValueChange={(value) => {
+                  const newSettings = { ...settings, alertRadius: value };
+                  setSettings(newSettings);
+                  saveToStorage(newSettings);
+                }}
               >
                 <SelectTrigger className="mt-1">
-                  <SelectValue />
+                  <SelectValue placeholder="Select radius" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="2">2 km</SelectItem>
@@ -546,6 +596,8 @@ export function SettingsPage() {
           icon={Bell}
           title="Notifications"
           description="Control your notification preferences"
+          activeSection={activeSection}
+          onToggle={handleToggleSection}
         >
           <div className="space-y-4">
             <SettingItem
@@ -553,10 +605,12 @@ export function SettingsPage() {
               description="Get notified when food is posted nearby"
             >
               <Switch
-                checked={settings.nearbyAlerts}
-                onCheckedChange={(checked) =>
-                  setSettings({ ...settings, nearbyAlerts: checked })
-                }
+                checked={settings.nearbyAlerts ?? false}
+                onCheckedChange={(checked) => {
+                  const newSettings = { ...settings, nearbyAlerts: checked };
+                  setSettings(newSettings);
+                  saveToStorage(newSettings);
+                }}
               />
             </SettingItem>
 
@@ -565,10 +619,12 @@ export function SettingsPage() {
               description="Reminders before food expires"
             >
               <Switch
-                checked={settings.expiryReminders}
-                onCheckedChange={(checked) =>
-                  setSettings({ ...settings, expiryReminders: checked })
-                }
+                checked={settings.expiryReminders ?? false}
+                onCheckedChange={(checked) => {
+                  const newSettings = { ...settings, expiryReminders: checked };
+                  setSettings(newSettings);
+                  saveToStorage(newSettings);
+                }}
               />
             </SettingItem>
 
@@ -577,10 +633,12 @@ export function SettingsPage() {
               description="Updates on pickup confirmations"
             >
               <Switch
-                checked={settings.pickupNotifications}
-                onCheckedChange={(checked) =>
-                  setSettings({ ...settings, pickupNotifications: checked })
-                }
+                checked={settings.pickupNotifications ?? false}
+                onCheckedChange={(checked) => {
+                  const newSettings = { ...settings, pickupNotifications: checked };
+                  setSettings(newSettings);
+                  saveToStorage(newSettings);
+                }}
               />
             </SettingItem>
 
@@ -590,10 +648,12 @@ export function SettingsPage() {
               label="Push Notifications"
             >
               <Switch
-                checked={settings.pushNotifications}
-                onCheckedChange={(checked) =>
-                  setSettings({ ...settings, pushNotifications: checked })
-                }
+                checked={settings.pushNotifications ?? false}
+                onCheckedChange={(checked) => {
+                  const newSettings = { ...settings, pushNotifications: checked };
+                  setSettings(newSettings);
+                  saveToStorage(newSettings);
+                }}
               />
             </SettingItem>
 
@@ -601,10 +661,12 @@ export function SettingsPage() {
               label="Email Notifications"
             >
               <Switch
-                checked={settings.emailNotifications}
-                onCheckedChange={(checked) =>
-                  setSettings({ ...settings, emailNotifications: checked })
-                }
+                checked={settings.emailNotifications ?? false}
+                onCheckedChange={(checked) => {
+                  const newSettings = { ...settings, emailNotifications: checked };
+                  setSettings(newSettings);
+                  saveToStorage(newSettings);
+                }}
               />
             </SettingItem>
           </div>
@@ -616,6 +678,8 @@ export function SettingsPage() {
           icon={Shield}
           title="Privacy & Safety"
           description="Control your privacy settings"
+          activeSection={activeSection}
+          onToggle={handleToggleSection}
         >
           <div className="space-y-4">
             <SettingItem
@@ -623,10 +687,12 @@ export function SettingsPage() {
               description="Only show approximate location until pickup confirmed"
             >
               <Switch
-                checked={settings.hideLocation}
-                onCheckedChange={(checked) =>
-                  setSettings({ ...settings, hideLocation: checked })
-                }
+                checked={settings.hideLocation ?? false}
+                onCheckedChange={(checked) => {
+                  const newSettings = { ...settings, hideLocation: checked };
+                  setSettings(newSettings);
+                  saveToStorage(newSettings);
+                }}
               />
             </SettingItem>
 
@@ -636,10 +702,12 @@ export function SettingsPage() {
                 description="Give priority to verified NGOs"
               >
                 <Switch
-                  checked={settings.ngoPriority}
-                  onCheckedChange={(checked) =>
-                    setSettings({ ...settings, ngoPriority: checked })
-                  }
+                  checked={settings.ngoPriority ?? false}
+                  onCheckedChange={(checked) => {
+                    const newSettings = { ...settings, ngoPriority: checked };
+                    setSettings(newSettings);
+                    saveToStorage(newSettings);
+                  }}
                 />
               </SettingItem>
             )}
@@ -656,6 +724,8 @@ export function SettingsPage() {
           icon={Lock}
           title="Security"
           description="Manage your account security"
+          activeSection={activeSection}
+          onToggle={handleToggleSection}
         >
           <div className="space-y-3">
             <Button variant="outline" className="w-full justify-start">
@@ -676,6 +746,8 @@ export function SettingsPage() {
           icon={Palette}
           title="Appearance"
           description="Customize how the app looks"
+          activeSection={activeSection}
+          onToggle={handleToggleSection}
         >
           <div className="space-y-4">
             <div>
@@ -713,10 +785,12 @@ export function SettingsPage() {
               description="Minimize animations and effects"
             >
               <Switch
-                checked={settings.reduceMotion}
-                onCheckedChange={(checked) =>
-                  setSettings({ ...settings, reduceMotion: checked })
-                }
+                checked={settings.reduceMotion ?? false}
+                onCheckedChange={(checked) => {
+                  const newSettings = { ...settings, reduceMotion: checked };
+                  setSettings(newSettings);
+                  saveToStorage(newSettings);
+                }}
               />
             </SettingItem>
           </div>
@@ -728,6 +802,8 @@ export function SettingsPage() {
           icon={HelpCircle}
           title="Help & Support"
           description="Get help and send feedback"
+          activeSection={activeSection}
+          onToggle={handleToggleSection}
         >
           <div className="space-y-3">
             <Button
@@ -769,6 +845,8 @@ export function SettingsPage() {
           icon={FileText}
           title="Legal"
           description="Terms and privacy information"
+          activeSection={activeSection}
+          onToggle={handleToggleSection}
         >
           <div className="space-y-3">
             <Button

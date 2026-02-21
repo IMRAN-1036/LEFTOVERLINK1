@@ -1,0 +1,442 @@
+import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { MessageCircle, X, ChevronLeft, Phone, Video, Send, CheckCheck } from 'lucide-react';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { format, formatDistanceToNow } from 'date-fns';
+import { useAuth } from '../context/AuthContext';
+import { useLocation } from 'react-router';
+import { ChatMessage } from './ChatDialog'; // Reusing type
+
+
+
+// Helper to extract unique counter-parties from pickupHistory
+function getUniqueContactsCount(userRole: string | undefined, userId: string | undefined): { id: string, name: string, lastActive: Date, orderId: string }[] {
+    try {
+        const historyStr = localStorage.getItem('pickupHistory');
+        if (!historyStr || !userRole || !userId) return [];
+        const history = JSON.parse(historyStr);
+
+        const contactMap = new Map();
+
+        history.forEach((order: any) => {
+            // For Receivers: contact is Provider
+            // For Providers: contact is Receiver
+            const isRelatedToMe = userRole === 'receiver'
+                ? (order.receiverId === userId || String(order.receiverId) === String(userId))
+                : (order.providerId === userId || String(order.providerId) === String(userId));
+
+            if (!isRelatedToMe) return;
+
+            const contactName = userRole === 'receiver' ? order.providerName : order.receiverName;
+            const contactId = userRole === 'receiver' ? order.providerId : order.receiverId;
+
+            if (contactName && order.id) {
+                if (!contactMap.has(contactName)) {
+                    contactMap.set(contactName, {
+                        id: contactId || `contact-${Date.now()}`,
+                        name: contactName,
+                        lastActive: order.pickupTime ? new Date(order.pickupTime) : new Date(),
+                        orderId: order.id
+                    });
+                }
+            }
+        });
+
+        return Array.from(contactMap.values()).sort((a, b) => b.lastActive.getTime() - a.lastActive.getTime());
+    } catch {
+        return [];
+    }
+}
+
+export function GlobalChatWidget() {
+    const { user } = useAuth();
+    const location = useLocation();
+
+    const [isOpen, setIsOpen] = useState(false);
+    const [providers, setProviders] = useState<any[]>([]);
+
+    // activeChat references a specific provider connection
+    const [activeChat, setActiveChat] = useState<{ name: string, orderId: string } | null>(null);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [inputText, setInputText] = useState('');
+    const [isTyping, setIsTyping] = useState(false);
+    const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+    const [isMapExpanded, setIsMapExpanded] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const constraintsRef = useRef<HTMLDivElement>(null);
+
+    // Initial check for unread messages on mount
+    useEffect(() => {
+        const checkUnread = () => {
+            const unreadStatus = localStorage.getItem('chat_has_unread');
+            setHasUnreadMessages(unreadStatus === 'true');
+        };
+        const handleMapExpansion = (e: any) => {
+            setIsMapExpanded(e.detail);
+        };
+
+        checkUnread();
+
+        // Listen for storage events across tabs or from other components
+        window.addEventListener('storage', checkUnread);
+
+        // Custom event for same-window updates
+        window.addEventListener('chat_unread_update', checkUnread);
+        window.addEventListener('map_expanded', handleMapExpansion);
+
+        return () => {
+            window.removeEventListener('storage', checkUnread);
+            window.removeEventListener('chat_unread_update', checkUnread);
+            window.removeEventListener('map_expanded', handleMapExpansion);
+        }
+    }, []);
+
+    // Clear unread status when chat is opened
+    useEffect(() => {
+        if (isOpen) {
+            setHasUnreadMessages(false);
+            localStorage.setItem('chat_has_unread', 'false');
+            window.dispatchEvent(new Event('chat_unread_update'));
+        }
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (isOpen && !activeChat) {
+            const userId = user?.id || (user as any)?._id;
+            setProviders(getUniqueContactsCount(user?.role, userId));
+        }
+    }, [isOpen, activeChat, user]);
+
+    // Load messages when a chat is selected, and poll for new messages every second
+    useEffect(() => {
+        if (!activeChat) return;
+
+        const storageKey = `chat_${activeChat.orderId}`;
+
+        const loadMessages = () => {
+            const saved = localStorage.getItem(storageKey);
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    setMessages(parsed);
+                } catch { /* ignore parse errors */ }
+            } else {
+                setMessages([]);
+            }
+        };
+
+        loadMessages();
+        const interval = setInterval(loadMessages, 1000);
+        return () => clearInterval(interval);
+    }, [activeChat]);
+
+    // Auto-scroll
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages, isTyping]);
+
+    const handleSendMessage = (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (!inputText.trim() || !activeChat) return;
+
+        const storageKey = `chat_${activeChat.orderId}`;
+        const isProviderRole = user?.role === 'provider';
+
+        const newMessage: ChatMessage = {
+            id: Date.now().toString(),
+            text: inputText.trim(),
+            senderId: isProviderRole ? 'provider' : 'receiver',
+            timestamp: new Date(),
+            isProvider: isProviderRole
+        };
+
+        // Read latest from localStorage to avoid overwriting the other party's messages
+        const latestStr = localStorage.getItem(storageKey);
+        const latestMessages = latestStr ? JSON.parse(latestStr) : [];
+        const updatedMessages = [...latestMessages, newMessage];
+        localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
+        setMessages(updatedMessages);
+        setInputText('');
+    };
+
+    // Corner snapping logic
+    type Corner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
+    const [corner, setCorner] = useState<Corner>('bottom-right');
+    const isDragging = useRef(false);
+
+    const cornerPositionClasses: Record<Corner, string> = {
+        'bottom-right': 'bottom-6 right-6',
+        'bottom-left': 'bottom-6 left-6',
+        'top-right': 'top-6 right-6',
+        'top-left': 'top-6 left-6',
+    };
+
+    const handleDragEnd = (_: any, info: any) => {
+        const { point } = info;
+        const midX = window.innerWidth / 2;
+        const midY = window.innerHeight / 2;
+
+        const newCorner: Corner =
+            point.x < midX && point.y < midY ? 'top-left' :
+                point.x >= midX && point.y < midY ? 'top-right' :
+                    point.x < midX && point.y >= midY ? 'bottom-left' :
+                        'bottom-right';
+
+        setCorner(newCorner);
+        // Mark as dragged so we can suppress the click
+        isDragging.current = true;
+        setTimeout(() => { isDragging.current = false; }, 50);
+    };
+
+    const handleFabClick = () => {
+        if (isDragging.current) return; // Suppress click after drag
+        setIsOpen(true);
+    };
+
+    // Hide temporarily if map is expanded or if explicitly on the standalone Map page
+    if (!user || isMapExpanded || location.pathname === '/provider/map') return null;
+
+    const isProviderView = user.role === 'provider';
+
+    // Determine flex alignment for the chat drawer based on corner
+    const chatAlignClass =
+        corner.includes('right') ? 'items-end' : 'items-start';
+
+    return (
+        <>
+            {/* Floating Action Button — fixed to corner, draggable to snap */}
+            <AnimatePresence>
+                {!isOpen && (
+                    <motion.div
+                        drag
+                        dragMomentum={false}
+                        dragElastic={0.15}
+                        dragConstraints={{ top: 0, left: 0, right: 0, bottom: 0 }}
+                        onDragEnd={handleDragEnd}
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.5 }}
+                        transition={{ type: "spring", damping: 20, stiffness: 300 }}
+                        className={`fixed ${cornerPositionClasses[corner]} z-[10000] cursor-grab active:cursor-grabbing pointer-events-auto`}
+                    >
+                        <Button
+                            onClick={handleFabClick}
+                            className="w-16 h-16 rounded-full bg-green-600 hover:bg-green-700 text-white shadow-2xl flex items-center justify-center hover:scale-110 transition-transform relative group"
+                        >
+                            <MessageCircle className="w-8 h-8" />
+
+                            {/* Notification Badge */}
+                            {hasUnreadMessages && (
+                                <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 rounded-full border-2 border-white dark:border-zinc-950 animate-pulse" />
+                            )}
+                        </Button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Chat Drawer / Overlay — anchored near the corner */}
+            <AnimatePresence>
+                {isOpen && (
+                    <div className={`fixed ${cornerPositionClasses[corner]} z-[10000] pointer-events-auto flex flex-col ${chatAlignClass}`}>
+                        <motion.div
+                            initial={{ opacity: 0, y: corner.includes('bottom') ? 200 : -200, scale: 0.9 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: corner.includes('bottom') ? 200 : -200, scale: 0.9 }}
+                            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                            className="w-[300px] sm:w-[380px] h-[600px] max-h-[85vh] bg-white dark:bg-zinc-950 rounded-3xl shadow-2xl border border-border/50 flex flex-col overflow-hidden"
+                        >
+
+                            {/* 1. Header Area */}
+                            <div className="bg-green-600 text-white p-4 flex items-center justify-between shrink-0 shadow-md z-10">
+                                <div className="flex items-center gap-3">
+                                    {activeChat && (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="text-white hover:bg-green-700 w-8 h-8 rounded-full"
+                                            onClick={() => setActiveChat(null)}
+                                        >
+                                            <ChevronLeft className="w-6 h-6" />
+                                        </Button>
+                                    )}
+                                    <div>
+                                        <h3 className="font-bold text-lg leading-tight">
+                                            {activeChat ? activeChat.name : 'Messages'}
+                                        </h3>
+                                        {activeChat && (
+                                            <p className="text-xs text-green-100 font-medium">
+                                                {isTyping ? 'typing...' : 'Online'}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-1">
+                                    {activeChat && (
+                                        <>
+                                            <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full text-white hover:bg-green-700">
+                                                <Phone className="w-4 h-4" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full text-white hover:bg-green-700">
+                                                <Video className="w-4 h-4" />
+                                            </Button>
+                                        </>
+                                    )}
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="w-8 h-8 rounded-full text-white hover:bg-green-700 hover:text-red-300"
+                                        onClick={() => {
+                                            setIsOpen(false);
+                                            // Optional: keep strict chat state, or reset:
+                                            // setTimeout(() => setActiveChat(null), 300)
+                                        }}
+                                    >
+                                        <X className="w-5 h-5" />
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {/* 2. Main Content Area */}
+                            <div className="flex-1 bg-slate-50 dark:bg-zinc-900 overflow-y-auto">
+                                {!activeChat ? (
+                                    /* Provider List View */
+                                    <motion.div
+                                        initial={{ opacity: 0, x: -20 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        className="p-2 space-y-1"
+                                    >
+                                        {providers.length === 0 ? (
+                                            <div className="flex flex-col items-center justify-center p-8 text-center h-full mt-20">
+                                                <MessageCircle className="w-12 h-12 text-muted-foreground/30 mb-4" />
+                                                <p className="text-muted-foreground font-medium">No active conversations.</p>
+                                                <p className="text-xs text-muted-foreground mt-2">Claim food orders to start chatting with providers!</p>
+                                            </div>
+                                        ) : (
+                                            providers.map((provider) => (
+                                                <div
+                                                    key={provider.orderId}
+                                                    onClick={() => setActiveChat({ name: provider.name, orderId: provider.orderId })}
+                                                    className="flex items-center gap-4 p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
+                                                >
+                                                    <div className="relative">
+                                                        <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-green-700 dark:text-green-500 font-bold text-xl">
+                                                            {provider.name.charAt(0).toUpperCase()}
+                                                        </div>
+                                                        <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white dark:border-zinc-900 rounded-full"></span>
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex justify-between items-baseline mb-0.5">
+                                                            <h4 className="font-bold truncate text-[15px]">{provider.name}</h4>
+                                                            <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">
+                                                                {formatDistanceToNow(provider.lastActive, { addSuffix: true })}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-sm text-muted-foreground truncate font-medium">
+                                                            Tap to open chat history
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </motion.div>
+                                ) : (
+                                    /* Active Chat Messages View */
+                                    <motion.div
+                                        initial={{ opacity: 0, x: 20 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        className="p-4 space-y-4"
+                                    >
+                                        <div className="text-center text-xs text-muted-foreground my-4 font-black uppercase tracking-widest bg-black/5 dark:bg-white/5 rounded-full py-1 px-3 w-max mx-auto">
+                                            Today
+                                        </div>
+
+                                        <AnimatePresence initial={false}>
+                                            {messages.map((msg) => {
+                                                const isProviderRole = user?.role === 'provider';
+                                                const isMe = isProviderRole ? msg.isProvider : !msg.isProvider;
+                                                return (
+                                                    <motion.div
+                                                        key={msg.id}
+                                                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                        className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                                                    >
+                                                        <div className={`max-w-[80%] flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                                                            <div
+                                                                className={`px-4 py-2.5 shadow-sm text-[15px] leading-relaxed ${isMe
+                                                                    ? 'bg-green-600 text-white rounded-2xl rounded-tr-sm'
+                                                                    : 'bg-white dark:bg-zinc-800 border border-border/50 text-foreground rounded-2xl rounded-tl-sm'
+                                                                    }`}
+                                                            >
+                                                                {msg.text}
+                                                            </div>
+                                                            <div className="flex items-center gap-1 mt-1 px-1">
+                                                                <span className="text-[10px] text-muted-foreground/70 font-semibold">
+                                                                    {format(new Date(msg.timestamp), 'h:mm a')}
+                                                                </span>
+                                                                {isMe && <CheckCheck className="w-3.5 h-3.5 text-green-600" />}
+                                                            </div>
+                                                        </div>
+                                                    </motion.div>
+                                                );
+                                            })}
+                                        </AnimatePresence>
+
+                                        {/* Typing Indicator */}
+                                        {isTyping && (
+                                            <motion.div
+                                                initial={{ opacity: 0, scale: 0.9 }}
+                                                animate={{ opacity: 1, scale: 1 }}
+                                                exit={{ opacity: 0, scale: 0.9 }}
+                                                className="flex justify-start"
+                                            >
+                                                <div className="bg-white dark:bg-zinc-800 border border-border/50 rounded-2xl rounded-tl-sm px-4 py-3.5 shadow-sm flex items-center gap-1.5">
+                                                    <motion.div className="w-1.5 h-1.5 bg-green-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} />
+                                                    <motion.div className="w-1.5 h-1.5 bg-green-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} />
+                                                    <motion.div className="w-1.5 h-1.5 bg-green-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} />
+                                                </div>
+                                            </motion.div>
+                                        )}
+
+                                        <div ref={messagesEndRef} />
+                                    </motion.div>
+                                )}
+                            </div>
+
+                            {/* 3. Input Area (Only visible in Active Chat) */}
+                            <AnimatePresence>
+                                {activeChat && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: 20 }}
+                                        className="bg-white dark:bg-zinc-950 border-t p-3 shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.03)]"
+                                    >
+                                        <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+                                            <Input
+                                                value={inputText}
+                                                onChange={(e) => setInputText(e.target.value)}
+                                                placeholder="Message..."
+                                                className="flex-1 rounded-full bg-slate-100 dark:bg-zinc-900 border-none h-12 px-5 text-[15px] focus-visible:ring-1 focus-visible:ring-green-500"
+                                            />
+                                            <Button
+                                                type="submit"
+                                                disabled={!inputText.trim()}
+                                                size="icon"
+                                                className="w-12 h-12 rounded-full bg-green-600 hover:bg-green-700 text-white shadow-md disabled:opacity-50 transition-all hover:scale-105 active:scale-95 shrink-0"
+                                            >
+                                                <Send className="w-5 h-5 ml-1" />
+                                            </Button>
+                                        </form>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+        </>
+    );
+}
