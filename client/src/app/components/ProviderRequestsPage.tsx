@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Header } from './Header';
-import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, Info, Users, ClipboardList, CheckCircle2, XCircle, Navigation } from 'lucide-react';
+import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, Info, Users, ClipboardList, CheckCircle2, XCircle, Navigation, MessageCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -21,6 +21,7 @@ import {
 
 import { Input } from './ui/input';
 import { toast } from 'sonner';
+import { ChatDialog } from './ChatDialog';
 
 export function ProviderRequestsPage() {
     const navigate = useNavigate();
@@ -33,6 +34,10 @@ export function ProviderRequestsPage() {
     // Order Details State
     const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
     const [deliveryTimeInput, setDeliveryTimeInput] = useState('');
+
+    // Chat State
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [activeChatOrder, setActiveChatOrder] = useState<any>(null);
 
     useEffect(() => {
         if (!user || user.role !== 'provider') return;
@@ -47,7 +52,7 @@ export function ProviderRequestsPage() {
                         const pid = String(order.providerId);
                         const uid = String(user.id || (user as any)._id);
                         const matchesProvider = pid === uid || order.providerName === user.name;
-                        return matchesProvider && order.requestStatus === 'pending';
+                        return matchesProvider && (order.requestStatus === 'pending' || order.requestStatus === 'accepted');
                     });
                     setOrders(myProvidedOrders);
                 }
@@ -123,7 +128,8 @@ export function ProviderRequestsPage() {
                         }
                         return item;
                     });
-                    setOrders(prev => prev.filter(o => o.id !== orderId));
+                    // DO NOT remove accepted orders from view
+                    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, requestStatus: action } : o));
                 }
 
                 localStorage.setItem('pickupHistory', JSON.stringify(updatedHistory));
@@ -259,13 +265,29 @@ export function ProviderRequestsPage() {
                                                     </Button>
                                                 </>
                                             ) : (
-                                                <Badge
-                                                    className={`justify-center h-11 text-sm font-bold rounded-xl w-full flex items-center gap-2 ${order.requestStatus === 'accepted' ? 'bg-green-100 text-green-700 border-green-200 pointer-events-none' : 'bg-red-100 text-red-700 border-red-200 pointer-events-none'}`}
-                                                    variant="outline"
-                                                >
-                                                    {order.requestStatus === 'accepted' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <XCircle className="w-4 h-4 shrink-0" />}
-                                                    {order.requestStatus === 'accepted' ? 'Accepted' : 'Declined'}
-                                                </Badge>
+                                                <div className="flex flex-col gap-2 w-full">
+                                                    <Badge
+                                                        className={`justify-center h-11 text-sm font-bold rounded-xl w-full flex items-center gap-2 ${order.requestStatus === 'accepted' ? 'bg-green-100 text-green-700 border-green-200 pointer-events-none' : 'bg-red-100 text-red-700 border-red-200 pointer-events-none'}`}
+                                                        variant="outline"
+                                                    >
+                                                        {order.requestStatus === 'accepted' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <XCircle className="w-4 h-4 shrink-0" />}
+                                                        {order.requestStatus === 'accepted' ? 'Accepted' : 'Declined'}
+                                                    </Badge>
+                                                    {order.requestStatus === 'accepted' && (
+                                                        <Button
+                                                            variant="outline"
+                                                            className="w-full text-green-700 border-green-200 hover:bg-green-50 rounded-xl font-bold gap-2 h-11 transition-all shadow-sm px-0"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setActiveChatOrder(order);
+                                                                setIsChatOpen(true);
+                                                            }}
+                                                        >
+                                                            <MessageCircle className="w-4 h-4 shrink-0" />
+                                                            Chat with Receiver
+                                                        </Button>
+                                                    )}
+                                                </div>
                                             )}
 
                                             <Button
@@ -430,6 +452,17 @@ export function ProviderRequestsPage() {
                     )}
                 </DialogContent>
             </Dialog>
+
+            {/* Global Chat Dialog Overlay */}
+            {activeChatOrder && (
+                <ChatDialog
+                    isOpen={isChatOpen}
+                    onClose={() => setIsChatOpen(false)}
+                    orderId={activeChatOrder.id}
+                    providerName={activeChatOrder.receiverName || 'Receiver'}
+                    isProviderView={true}
+                />
+            )}
         </div>
     );
 }

@@ -31,7 +31,9 @@ import {
     Trash2,
     Maximize2,
     X,
-    ShoppingBag
+    ShoppingBag,
+    Send,
+    MessageCircle
 } from 'lucide-react';
 import { getTimeLeft, calculateDistance, calculateUrgency } from '../mockData';
 import api from '../api/axios';
@@ -54,6 +56,7 @@ import { InsightBanner } from '../features/insights/InsightBanner';
 import { getReceiverInsights } from '../shared/ai/insightEngine';
 import { PickupDialog } from '../../features/receiver/PickupDialog';
 import { FoodList } from '../../features/receiver/FoodList';
+import { ChatDialog } from './ChatDialog';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 
@@ -70,7 +73,12 @@ export function ReceiverDashboard() {
 
     // Pickup Flow States
     const [selectedFood, setSelectedFood] = useState<FoodPost | null>(null);
+    const [existingOrder, setExistingOrder] = useState<any>(null);
     const [isPickupDialogOpen, setIsPickupDialogOpen] = useState(false);
+
+    // Chat States
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [chatOrder, setChatOrder] = useState<any>(null);
 
     // Pickup history will be loaded from API when available; start empty
     const [pickupHistory, setPickupHistory] = useState<any[]>([]);
@@ -111,19 +119,21 @@ export function ReceiverDashboard() {
         if (isSettingsLoading) return;
 
         // Auto-detect if enabled and no coordinates present
-        if (userSettings.autoLocation && (userSettings.lat === 0 || userSettings.lng === 0)) {
+        if (userSettings.autoLocation && (!userSettings.lat || !userSettings.lng || userSettings.lat === 0 || userSettings.lng === 0)) {
             handleAutoDetect(true);
         }
 
         // Setup watcher for movement
         const watchId = watchLocation((coords) => {
-            setUserSettings({ lat: coords.lat, lng: coords.lng });
+            if (coords.lat && coords.lng) {
+                setUserSettings({ lat: coords.lat, lng: coords.lng });
+            }
         });
 
         return () => {
             if (watchId !== null) navigator.geolocation.clearWatch(watchId);
         };
-    }, [isSettingsLoading]); // Dependency on isSettingsLoading to run once loaded
+    }, [isSettingsLoading, userSettings.autoLocation]); // Updated dependencies
 
     const handleAutoDetect = async (silent = false) => {
         const location = await detectLocation(silent);
@@ -187,6 +197,14 @@ export function ReceiverDashboard() {
 
     useEffect(() => {
         fetchFoods();
+
+        // Refetch every 5 seconds to catch new posts from providers
+        const interval = setInterval(() => {
+            console.log('Auto-refetching receiver foods...');
+            fetchFoods();
+        }, 5000);
+
+        return () => clearInterval(interval);
     }, []);
 
     const filteredPosts = foods
@@ -198,15 +216,20 @@ export function ReceiverDashboard() {
             // Do not show expired food
             if (new Date() > new Date(post.expiryTime)) return false;
 
+            // Validate location data
+            if (!post.location || !post.location.lat || !post.location.lng || isNaN(post.location.lat) || isNaN(post.location.lng)) {
+                return false;
+            }
+
             if (searchQuery) {
                 const query = searchQuery.toLowerCase();
                 return post.foodType.toLowerCase().includes(query) ||
                     post.providerName.toLowerCase().includes(query) ||
-                    post.location.address.toLowerCase().includes(query);
+                    (post.location?.address || '').toLowerCase().includes(query);
             }
             if (filter !== 'all' && post.dietaryType !== filter) return false;
 
-            if (userSettings?.autoLocation && userSettings?.lat && userSettings?.lng) {
+            if (userSettings?.autoLocation && userSettings?.lat && userSettings?.lng && userSettings.lat !== 0 && userSettings.lng !== 0) {
                 const distance = calculateDistance(userSettings.lat, userSettings.lng, post.location.lat, post.location.lng);
                 return distance <= parseFloat(userSettings.alertRadius || '10');
             }
@@ -214,7 +237,7 @@ export function ReceiverDashboard() {
         })
         .map(post => {
             let distance: number | null = null;
-            if (userSettings?.lat && userSettings?.lng) {
+            if (userSettings?.lat && userSettings?.lng && userSettings.lat !== 0 && userSettings.lng !== 0) {
                 distance = calculateDistance(userSettings.lat, userSettings.lng, post.location.lat, post.location.lng);
             }
             return { ...post, distance } as (FoodPost & { distance: number | null });
@@ -248,8 +271,37 @@ export function ReceiverDashboard() {
         } catch (error) {
             console.error('Failed to increment view count', error);
         }
+
+        const historyStr = localStorage.getItem('pickupHistory');
+        const userStr = localStorage.getItem('user');
+        let foundOrder = null;
+
+        if (historyStr && userStr) {
+            const history = JSON.parse(historyStr);
+            const user = JSON.parse(userStr);
+            const uid = user.id || user._id;
+
+            foundOrder = history.find((i: any) =>
+                i.foodPostId === post.id &&
+                i.receiverId === uid &&
+                (i.requestStatus === 'pending' || (i.requestStatus === 'accepted' && i.paymentStatus === 'pending'))
+            );
+        }
+
+        setExistingOrder(foundOrder || null);
         setSelectedFood(post as any);
         setIsPickupDialogOpen(true);
+    };
+
+    const handleContinuePayment = (order: any, foodPost: FoodPost) => {
+        setExistingOrder(order);
+        setSelectedFood(foodPost);
+        setIsPickupDialogOpen(true);
+    };
+
+    const handleOpenChat = (order: any) => {
+        setChatOrder(order);
+        setIsChatOpen(true);
     };
 
     const handleClaim = async (id: string) => {
@@ -466,6 +518,8 @@ export function ReceiverDashboard() {
                         <FoodList
                             posts={filteredPosts}
                             onSelectPost={handleSelectPost}
+                            onContinuePayment={handleContinuePayment}
+                            onOpenChat={handleOpenChat}
                             onRemovePost={(id) => setRemovedPostIds(prev => new Set([...prev, id]))}
                             filter={filter}
                             searchQuery={searchQuery}
@@ -520,10 +574,22 @@ export function ReceiverDashboard() {
             {/* Pickup Dialog */}
             <PickupDialog
                 selectedFood={selectedFood}
+                existingOrder={existingOrder}
                 isOpen={isPickupDialogOpen}
                 setIsOpen={setIsPickupDialogOpen}
                 onSuccess={fetchFoods}
             />
+
+            {/* Chat Dialog */}
+            {chatOrder && (
+                <ChatDialog
+                    isOpen={isChatOpen}
+                    onClose={() => setIsChatOpen(false)}
+                    orderId={chatOrder.id}
+                    providerName={chatOrder.providerName || 'Provider'}
+                    isProviderView={false}
+                />
+            )}
         </div>
     );
 }

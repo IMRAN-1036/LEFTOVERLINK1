@@ -76,7 +76,12 @@ const incrementViewsHandler = async (req, res, next) => {
 
 const claimFoodHandler = async (req, res, next) => {
   try {
-    const food = await claimFood({ id: req.params.id, receiverId: req.user.id });
+    const requestedMeals = req.body.requestedMeals ? parseInt(req.body.requestedMeals, 10) : 1;
+    const food = await claimFood({ 
+        id: req.params.id, 
+        receiverId: req.user.id,
+        requestedMeals
+    });
     // For compatibility, respond with a simple message
     return res.json({ message: "Food claimed successfully", food });
   } catch (err) {

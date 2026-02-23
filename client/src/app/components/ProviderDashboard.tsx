@@ -65,11 +65,35 @@ export function ProviderDashboard() {
                 location: f.location || { lat: 0, lng: 0, address: 'Unknown' }
             }));
             setListings(myListings);
+            
+            // Load pending requests count
+            loadPendingRequestsCount();
         } catch (err) {
             console.error(err);
         }
     };
     const { user, logout, isLoading } = useAuth();
+    
+    // State for pending requests count
+    const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+    
+    const loadPendingRequestsCount = () => {
+        try {
+            const history = localStorage.getItem('pickupHistory');
+            if (history && user) {
+                const allHistory = JSON.parse(history);
+                const pendingCount = allHistory.filter((order: any) => {
+                    const pid = String(order.providerId);
+                    const uid = String(user.id || (user as any)._id);
+                    const matchesProvider = pid === uid || order.providerName === user.name;
+                    return matchesProvider && order.requestStatus === 'pending';
+                }).length;
+                setPendingRequestsCount(pendingCount);
+            }
+        } catch (err) {
+            console.error('Failed to load pending requests count', err);
+        }
+    };
 
     useEffect(() => {
         if (!isLoading) {
@@ -85,12 +109,26 @@ export function ProviderDashboard() {
         // Listen for cross-tab/local updates so new posts show up
         const onStorage = (e: StorageEvent) => {
             if (e.key === 'refreshProviderListings') {
+                console.log('Refreshing provider listings from storage event');
                 fetchData();
+            }
+            if (e.key === 'pickupHistory') {
+                loadPendingRequestsCount();
             }
         };
         window.addEventListener('storage', onStorage);
-        return () => window.removeEventListener('storage', onStorage);
-    }, [navigate]);
+
+        // Also refetch periodically (every 10 seconds) to catch updates
+        const interval = setInterval(() => {
+            console.log('Auto-refetching provider listings...');
+            fetchData();
+        }, 10000);
+
+        return () => {
+            window.removeEventListener('storage', onStorage);
+            clearInterval(interval);
+        };
+    }, [navigate, isLoading, user]);
 
     // Also refetch when navigated with state.refresh (immediate in same tab)
     const location = useRouterLocation();
@@ -162,11 +200,16 @@ export function ProviderDashboard() {
                         </Button>
                         <Button
                             variant="outline"
-                            className="bg-green-50 text-green-600 border-green-200 hover:bg-green-100 font-bold gap-2 px-3 h-9"
+                            className="bg-green-50 text-green-600 border-green-200 hover:bg-green-100 font-bold gap-2 px-3 h-9 relative"
                             onClick={() => navigate('/provider-requests')}
                         >
                             <ClipboardList className="w-4 h-4" />
                             <span className="hidden sm:inline">Requests</span>
+                            {pendingRequestsCount > 0 && (
+                                <div className="absolute -top-2 -right-2 min-w-[20px] h-5 flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full shadow-lg animate-pulse">
+                                    {pendingRequestsCount}
+                                </div>
+                            )}
                         </Button>
                         <Button
                             variant="outline"

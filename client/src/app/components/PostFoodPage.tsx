@@ -83,6 +83,12 @@ export function PostFoodPage() {
       return;
     }
 
+    // Validate that we have proper location coordinates
+    if (!detectedLocation || detectedLocation.lat === 0 || detectedLocation.lng === 0 || isNaN(detectedLocation.lat) || isNaN(detectedLocation.lng)) {
+      toast.error('Please detect your location or try again');
+      return;
+    }
+
     const earnings = getEarnings(quantity[0]);
     const expiryDate = new Date();
     expiryDate.setHours(expiryDate.getHours() + hoursUntilExpiry[0]);
@@ -98,8 +104,8 @@ export function PostFoodPage() {
       description: description,
       expiryTime: expiryDate,
       location: {
-        lat: detectedLocation?.lat || 0,
-        lng: detectedLocation?.lng || 0,
+        lat: detectedLocation.lat,
+        lng: detectedLocation.lng,
         address: address,
       },
       status: 'available',
@@ -117,6 +123,7 @@ export function PostFoodPage() {
         location: {
           lat: newPost.location.lat,
           lng: newPost.location.lng,
+          address: newPost.location.address,
         },
       };
 

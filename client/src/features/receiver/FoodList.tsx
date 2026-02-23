@@ -2,20 +2,22 @@ import { useState, useEffect } from 'react';
 import { Badge } from '../../app/components/ui/badge';
 import { Button } from '../../app/components/ui/button';
 import { Card } from '../../app/components/ui/card';
-import { Leaf, MapPin, Clock, Search, Trash2, UtensilsCrossed, Building2 } from 'lucide-react';
+import { Leaf, MapPin, Clock, Search, Trash2, UtensilsCrossed, Building2, MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { FoodPost } from '../../app/types';
 
 interface FoodListProps {
     posts: FoodPost[];
     onSelectPost: (post: FoodPost) => void;
+    onContinuePayment: (order: any, post: FoodPost) => void;
+    onOpenChat: (order: any) => void;
     onRemovePost: (id: string) => void;
     filter: string;
     searchQuery: string;
     onClearFilters: () => void;
 }
 
-export function FoodList({ posts, onSelectPost, onRemovePost, filter, searchQuery, onClearFilters }: FoodListProps) {
+export function FoodList({ posts, onSelectPost, onContinuePayment, onOpenChat, onRemovePost, filter, searchQuery, onClearFilters }: FoodListProps) {
     const getTimeLeft = (expiryTime: number | Date) => {
         const timeValue = typeof expiryTime === 'number' ? expiryTime : expiryTime.getTime();
         const now = Date.now();
@@ -27,7 +29,7 @@ export function FoodList({ posts, onSelectPost, onRemovePost, filter, searchQuer
         return `${minutes}m`;
     };
 
-    const [pendingRequests, setPendingRequests] = useState<Record<string, number>>({});
+    const [pendingRequests, setPendingRequests] = useState<Record<string, any>>({});
 
     useEffect(() => {
         const updatePendingRequests = () => {
@@ -38,17 +40,21 @@ export function FoodList({ posts, onSelectPost, onRemovePost, filter, searchQuer
                     const history = JSON.parse(historyStr);
                     const user = JSON.parse(userStr);
                     const now = Date.now();
-                    const pending: Record<string, number> = {};
+                    const pending: Record<string, any> = {};
                     let changed = false;
 
                     const updatedHistory = history.map((item: any) => {
                         const uid = user.id || user._id;
-                        if (item.receiverId === uid && item.requestStatus === 'pending') {
-                            if (item.requestExpiry > now) {
-                                pending[item.foodPostId] = item.requestExpiry;
-                            } else {
-                                item.requestStatus = 'expired';
-                                changed = true;
+                        if (item.receiverId === uid) {
+                            if (item.requestStatus === 'pending') {
+                                if (item.requestExpiry > now) {
+                                    pending[item.foodPostId] = item;
+                                } else {
+                                    item.requestStatus = 'expired';
+                                    changed = true;
+                                }
+                            } else if (item.requestStatus === 'accepted' && item.paymentStatus === 'pending') {
+                                pending[item.foodPostId] = item;
                             }
                         }
                         return item;
@@ -126,13 +132,29 @@ export function FoodList({ posts, onSelectPost, onRemovePost, filter, searchQuer
                                     </div>
 
                                     <div className="flex items-center gap-2">
-                                        {pendingRequests[post.id] ? (
+                                        {pendingRequests[post.id]?.requestStatus === 'pending' ? (
                                             <Button
                                                 disabled
                                                 className="flex-1 bg-slate-200 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400 font-bold cursor-not-allowed opacity-100"
                                             >
-                                                Requested [{formatCountdown(pendingRequests[post.id])}]
+                                                Requested [{formatCountdown(pendingRequests[post.id].requestExpiry)}]
                                             </Button>
+                                        ) : pendingRequests[post.id]?.requestStatus === 'accepted' && pendingRequests[post.id]?.paymentStatus === 'pending' ? (
+                                            <div className="flex gap-2 w-full">
+                                                <Button
+                                                    className="flex-1 bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-200 dark:shadow-none font-bold"
+                                                    onClick={() => onContinuePayment(pendingRequests[post.id], post)}
+                                                >
+                                                    Continue Payment
+                                                </Button>
+                                                <Button
+                                                    variant="outline"
+                                                    className="px-3 border-green-200 text-green-700 hover:bg-green-50 shrink-0"
+                                                    onClick={() => onOpenChat(pendingRequests[post.id])}
+                                                >
+                                                    <MessageCircle className="w-5 h-5" />
+                                                </Button>
+                                            </div>
                                         ) : (
                                             <Button
                                                 disabled={getTimeLeft(post.expiryTime) === 'Expired'}

@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
 
+import api from "../api/axios";
+
 export const useLocation = () => {
   const [isDetecting, setIsDetecting] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<
@@ -9,10 +11,10 @@ export const useLocation = () => {
 
   const reverseGeocode = async (lat: number, lng: number) => {
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1`,
-      );
-      const data = await response.json();
+      const response = await api.get('/location/reverse', {
+        params: { lat, lon: lng }
+      });
+      const data = response.data;
 
       const addr = data.address || {};
 

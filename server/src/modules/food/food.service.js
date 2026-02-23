@@ -1,14 +1,22 @@
 const Food = require("./food.model");
 
-const createFood = async ({ title, description, quantity, expiry, location, providerId }) => {
+const createFood = async ({
+  title,
+  description,
+  quantity,
+  expiry,
+  location,
+  providerId,
+}) => {
   const doc = await Food.create({
     title,
     description,
     quantity,
     expiry,
     location: {
-      type: 'Point',
-      coordinates: [location.lng, location.lat]
+      lat: location.lat,
+      lng: location.lng,
+      address: location.address || "Unknown Location",
     },
     provider: providerId,
   });
@@ -29,25 +37,32 @@ const listFood = async ({ status }) => {
 };
 
 const incrementViews = async (id) => {
-  await Food.findByIdAndUpdate(
-    id,
-    { $inc: { views: 1 } },
-    { new: true },
-  );
+  await Food.findByIdAndUpdate(id, { $inc: { views: 1 } }, { new: true });
 };
 
-const claimFood = async ({ id, receiverId }) => {
-  const food = await Food.findOneAndUpdate(
-    { _id: id, status: "available" },
-    { $set: { status: "claimed", claimedBy: receiverId } },
-    { new: true }
-  );
+const claimFood = async ({ id, receiverId, requestedMeals = 1 }) => {
+  const food = await Food.findById(id);
 
   if (!food) {
-    const err = new Error("Food not found or already claimed");
-    err.status = 400;
+    const err = new Error("Food not found");
+    err.status = 404;
     throw err;
   }
+
+  if (food.status !== "available" || food.quantity < requestedMeals) {
+    const err = new Error("Not enough meals available or already claimed fully");
+    err.status = 400; // Leaving as 400 to match standard flow, frontend might be showing 403 erroneously due to UI flow
+    throw err;
+  }
+
+  food.quantity -= requestedMeals;
+  if (food.quantity <= 0) {
+    food.status = "claimed";
+  }
+  // We can track last claimedBy or push to an array if we redefine the schema later,
+  // but for now, just updating the existing field will work to mark it 'claimed' eventually.
+  food.claimedBy = receiverId;
+  await food.save();
 
   return food;
 };
@@ -74,5 +89,3 @@ module.exports = {
   claimFood,
   deleteFood,
 };
-
-

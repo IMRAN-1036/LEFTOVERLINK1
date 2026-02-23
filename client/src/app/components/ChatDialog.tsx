@@ -2,17 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Send, X, Phone, Video, MoreVertical, CheckCheck, Loader2 } from 'lucide-react';
+import { Send, X, Phone, Video, CheckCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
-
-export interface ChatMessage {
-    id: string;
-    text: string;
-    senderId: string;
-    timestamp: Date;
-    isProvider: boolean;
-}
+import { chatSyncService, ChatMessage } from '../../shared/chatSync';
 
 interface ChatDialogProps {
     isOpen: boolean;
@@ -30,32 +23,40 @@ export function ChatDialog({ isOpen, onClose, orderId, providerName, isProviderV
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Unique storage key per order
-    const storageKey = `chat_${orderId}`;
-
     useEffect(() => {
         if (!isOpen) return;
 
         const loadMessages = () => {
-            const saved = localStorage.getItem(storageKey);
-            if (saved) {
-                try {
-                    setMessages(JSON.parse(saved));
-                } catch { /* ignore */ }
-            } else {
-                setMessages([]);
-            }
+            setMessages(chatSyncService.getMessages(orderId));
         };
 
         loadMessages();
-        // Poll for new messages every second for real-time sync
-        const interval = setInterval(loadMessages, 1000);
+
+        // Listen for same-window updates
+        const handleLocalUpdate = (e: any) => {
+            if (e.detail?.orderId === orderId) {
+                loadMessages();
+            }
+        };
+
+        // Listen for cross-tab updates
+        const handleStorageUpdate = (e: StorageEvent) => {
+            if (e.key === 'leftoverlink_chats') {
+                loadMessages();
+            }
+        };
+
+        window.addEventListener('local-chat-update', handleLocalUpdate);
+        window.addEventListener('storage', handleStorageUpdate);
 
         // Focus input after open
         setTimeout(() => inputRef.current?.focus(), 300);
 
-        return () => clearInterval(interval);
-    }, [isOpen, orderId, storageKey]);
+        return () => {
+            window.removeEventListener('local-chat-update', handleLocalUpdate);
+            window.removeEventListener('storage', handleStorageUpdate);
+        };
+    }, [isOpen, orderId]);
 
     useEffect(() => {
         // Auto-scroll to bottom
@@ -66,20 +67,13 @@ export function ChatDialog({ isOpen, onClose, orderId, providerName, isProviderV
         e?.preventDefault();
         if (!inputText.trim()) return;
 
-        const newMessage: ChatMessage = {
-            id: Date.now().toString(),
-            text: inputText.trim(),
-            senderId: isProviderView ? 'provider' : 'receiver',
-            timestamp: new Date(),
-            isProvider: isProviderView
-        };
+        chatSyncService.sendMessage(
+            orderId,
+            isProviderView ? 'provider' : 'receiver',
+            isProviderView ? 'provider' : 'receiver',
+            inputText.trim()
+        );
 
-        // Read latest from localStorage to avoid overwriting the other party's messages
-        const latestStr = localStorage.getItem(storageKey);
-        const latestMessages = latestStr ? JSON.parse(latestStr) : [];
-        const updatedMessages = [...latestMessages, newMessage];
-        localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
-        setMessages(updatedMessages);
         setInputText('');
     };
 
@@ -127,7 +121,7 @@ export function ChatDialog({ isOpen, onClose, orderId, providerName, isProviderV
 
                     <AnimatePresence initial={false}>
                         {messages.map((msg) => {
-                            const isMe = isProviderView ? msg.isProvider : (!msg.isProvider);
+                            const isMe = msg.senderRole === (isProviderView ? 'provider' : 'receiver');
                             return (
                                 <motion.div
                                     key={msg.id}

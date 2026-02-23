@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from '../../app/components/ui/button';
 import { Badge } from '../../app/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../app/components/ui/dialog';
 import { Label } from '../../app/components/ui/label';
 import { Input } from '../../app/components/ui/input';
-import { UtensilsCrossed, Building2, MapPin, AlertCircle, ChevronLeft, Wallet, Banknote, Smartphone, Landmark, CreditCard, CheckCircle2, IndianRupee, X } from 'lucide-react';
+import { UtensilsCrossed, Building2, MapPin, AlertCircle, ChevronLeft, Wallet, Banknote, Smartphone, Landmark, CreditCard, CheckCircle2, IndianRupee, X, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { FoodPost, PaymentMethod, PaymentRecord } from '../../app/types';
@@ -21,17 +21,19 @@ const paymentOptions = [
 
 export function PickupDialog({
     selectedFood,
+    existingOrder,
     isOpen,
     setIsOpen,
     onSuccess
 }: {
     selectedFood: FoodPost | null;
+    existingOrder?: any;
     isOpen: boolean;
     setIsOpen: (isOpen: boolean) => void;
     onSuccess: () => void;
 }) {
     const navigate = useNavigate();
-    const [pickupStep, setPickupStep] = useState<'details' | 'payment'>('details');
+    const [pickupStep, setPickupStep] = useState<'details' | 'payment' | 'pending'>('details');
     const [requestedMeals, setRequestedMeals] = useState<string>('1');
     const [isSubmittingPickup, setIsSubmittingPickup] = useState(false);
 
@@ -40,6 +42,20 @@ export function PickupDialog({
     const [paymentData, setPaymentData] = useState<any>({});
     const [expectedTime, setExpectedTime] = useState('');
     const [upiApp, setUpiApp] = useState<string | null>(null);
+
+    // Watch for existing order
+    useEffect(() => {
+        if (isOpen && existingOrder) {
+            if (existingOrder.requestStatus === 'accepted') {
+                setPickupStep('payment');
+                setRequestedMeals(existingOrder.numberOfMeals?.toString() || '1');
+            } else if (existingOrder.requestStatus === 'pending') {
+                setPickupStep('pending');
+            }
+        } else if (isOpen) {
+            setPickupStep('details');
+        }
+    }, [isOpen, existingOrder]);
 
     const calculateBilling = (meals: number) => {
         let pricePerPlate = 1;
@@ -63,7 +79,47 @@ export function PickupDialog({
             return;
         }
 
-        setPickupStep('payment');
+        setIsSubmittingPickup(true);
+
+        try {
+            const billing = calculateBilling(meals);
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            const settingsData = JSON.parse(localStorage.getItem('userSettings') || '{}');
+
+            const newPickup = {
+                id: `p-${Date.now()}`,
+                foodPostId: selectedFood?.id,
+                providerId: selectedFood?.providerId,
+                providerName: selectedFood?.providerName,
+                receiverId: user.id,
+                receiverName: user.name,
+                numberOfMeals: meals,
+                totalPrice: billing.totalAmount,
+                foodType: selectedFood?.foodType,
+                paymentMethod: 'pending',
+                paymentStatus: 'pending',
+                distance: selectedFood?.distance,
+                expectedTime: expectedTime,
+                requestStatus: 'pending',
+                requestExpiry: Date.now() + 15 * 60 * 1000, // 15 mins expiry for request
+                receiverLocation: {
+                    lat: settingsData.lat || 17.3850,
+                    lng: settingsData.lng || 78.4867
+                }
+            };
+
+            const history = JSON.parse(localStorage.getItem('pickupHistory') || '[]');
+            localStorage.setItem('pickupHistory', JSON.stringify([newPickup, ...history]));
+
+            toast.success('Pickup request sent to provider! Awaiting confirmation.');
+            setIsOpen(false);
+            onSuccess();
+        } catch (err) {
+            console.error('Failed to request pickup:', err);
+            toast.error('Failed to submit request.');
+        } finally {
+            setIsSubmittingPickup(false);
+        }
     };
 
     const validatePayment = () => {
@@ -119,36 +175,56 @@ export function PickupDialog({
         setIsSubmittingPickup(true);
 
         try {
-            await api.put(`/food/claim/${selectedFood.id}`);
-
             const meals = parseInt(requestedMeals);
+            await api.put(`/food/claim/${selectedFood.id}`, { requestedMeals: meals });
+
             const billing = calculateBilling(meals);
             const user = JSON.parse(localStorage.getItem('user') || '{}');
-            const settingsData = JSON.parse(localStorage.getItem('userSettings') || '{}');
 
-            const newPickup = {
-                id: `p-${Date.now()}`,
-                foodPostId: selectedFood.id,
-                providerId: selectedFood.providerId,
-                providerName: selectedFood.providerName,
-                receiverId: user.id,
-                receiverName: user.name,
-                numberOfMeals: meals,
-                totalPrice: billing.totalAmount,
-                pickupTime: new Date(),
-                confirmed: true,
-                foodType: selectedFood.foodType,
-                paymentMethod: paymentMethod,
-                paymentStatus: paymentMethod === 'cod' ? 'pending' : 'completed',
-                distance: selectedFood.distance,
-                expectedTime: expectedTime,
-                requestStatus: 'pending',
-                requestExpiry: Date.now() + 5 * 60 * 1000,
-                receiverLocation: {
-                    lat: settingsData.lat || 17.3850,
-                    lng: settingsData.lng || 78.4867
-                }
-            };
+            // If we are paying for an existing order, update it
+            if (existingOrder) {
+                const history = JSON.parse(localStorage.getItem('pickupHistory') || '[]');
+                const updatedHistory = history.map((item: any) => {
+                    if (item.id === existingOrder.id) {
+                        return {
+                            ...item,
+                            paymentMethod: paymentMethod,
+                            paymentStatus: paymentMethod === 'cod' ? 'pending' : 'completed',
+                            pickupTime: new Date()
+                        };
+                    }
+                    return item;
+                });
+                localStorage.setItem('pickupHistory', JSON.stringify(updatedHistory));
+            } else {
+                // Fallback if no existing order (shouldn't happen in the new flow, but just in case)
+                const settingsData = JSON.parse(localStorage.getItem('userSettings') || '{}');
+                const newPickup = {
+                    id: `p-${Date.now()}`,
+                    foodPostId: selectedFood.id,
+                    providerId: selectedFood.providerId,
+                    providerName: selectedFood.providerName,
+                    receiverId: user.id,
+                    receiverName: user.name,
+                    numberOfMeals: meals,
+                    totalPrice: billing.totalAmount,
+                    pickupTime: new Date(),
+                    confirmed: true,
+                    foodType: selectedFood.foodType,
+                    paymentMethod: paymentMethod,
+                    paymentStatus: paymentMethod === 'cod' ? 'pending' : 'completed',
+                    distance: selectedFood.distance,
+                    expectedTime: expectedTime || existingOrder?.expectedTime,
+                    requestStatus: 'accepted',
+                    requestExpiry: Date.now() + 5 * 60 * 1000,
+                    receiverLocation: {
+                        lat: settingsData.lat || 17.3850,
+                        lng: settingsData.lng || 78.4867
+                    }
+                };
+                const history = JSON.parse(localStorage.getItem('pickupHistory') || '[]');
+                localStorage.setItem('pickupHistory', JSON.stringify([newPickup, ...history]));
+            }
 
             const paymentRecord: PaymentRecord = {
                 id: `pay-${Date.now()}`,
@@ -163,9 +239,6 @@ export function PickupDialog({
             };
 
             await new Promise(resolve => setTimeout(resolve, 2000));
-
-            const history = JSON.parse(localStorage.getItem('pickupHistory') || '[]');
-            localStorage.setItem('pickupHistory', JSON.stringify([newPickup, ...history]));
 
             const payments = JSON.parse(localStorage.getItem('paymentHistory') || '[]');
             localStorage.setItem('paymentHistory', JSON.stringify([paymentRecord, ...payments]));
@@ -233,7 +306,7 @@ export function PickupDialog({
                 {selectedFood && (
                     <div className="flex flex-col">
                         <div className="bg-green-600 p-6 text-white text-center sm:text-left relative overflow-hidden">
-                            {pickupStep === 'payment' && (
+                            {pickupStep === 'payment' && !existingOrder && (
                                 <Button
                                     variant="ghost"
                                     size="icon"
@@ -254,20 +327,20 @@ export function PickupDialog({
                             </motion.button>
                             <DialogHeader className="p-0 text-white">
                                 <DialogTitle className="text-xl font-black">
-                                    {pickupStep === 'details' ? 'Confirm Pickup' : 'Payment Interface'}
+                                    {pickupStep === 'details' ? 'Confirm Pickup' : pickupStep === 'pending' ? 'Request Status' : 'Payment Interface'}
                                 </DialogTitle>
                                 <DialogDescription className="text-green-100 text-xs">
-                                    {pickupStep === 'details' ? 'Review details and complete your request' : 'Select a payment method and complete the transaction'}
+                                    {pickupStep === 'details' ? 'Review details and complete your request' : pickupStep === 'pending' ? 'Check your request progress' : 'Select a payment method and complete the transaction'}
                                 </DialogDescription>
                             </DialogHeader>
 
                             <div className="mt-6 flex items-start gap-4">
                                 <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-xl flex items-center justify-center shrink-0">
-                                    {pickupStep === 'details' ? <UtensilsCrossed className="w-6 h-6 text-white" /> : <Wallet className="w-6 h-6 text-white" />}
+                                    {pickupStep === 'details' ? <UtensilsCrossed className="w-6 h-6 text-white" /> : pickupStep === 'pending' ? <Clock className="w-6 h-6 text-white" /> : <Wallet className="w-6 h-6 text-white" />}
                                 </div>
                                 <div className="text-left">
                                     <h4 className="font-bold text-lg leading-tight">
-                                        {pickupStep === 'details' ? selectedFood.foodType : `Total: ₹${calculateBilling(parseInt(requestedMeals)).totalAmount}`}
+                                        {pickupStep === 'details' ? selectedFood.foodType : pickupStep === 'pending' ? 'Pending Approval' : `Total: ₹${calculateBilling(parseInt(requestedMeals)).totalAmount}`}
                                     </h4>
                                     <p className="text-sm text-green-100 flex items-center gap-1 mt-1">
                                         <Building2 className="w-3 h-3" /> {selectedFood.providerName}
@@ -376,11 +449,36 @@ export function PickupDialog({
                                             <Button
                                                 className="flex-1 h-12 rounded-xl font-black bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20"
                                                 onClick={handleConfirmPickup}
-                                                disabled={parseInt(requestedMeals) > selectedFood.quantity || parseInt(requestedMeals) <= 0 || !expectedTime.trim()}
+                                                disabled={isSubmittingPickup || parseInt(requestedMeals) > selectedFood.quantity || parseInt(requestedMeals) <= 0 || !expectedTime.trim()}
                                             >
-                                                Continue to Payment
+                                                {isSubmittingPickup ? 'Requesting...' : 'Request Pickup'}
                                             </Button>
                                         </DialogFooter>
+                                    </motion.div>
+                                ) : pickupStep === 'pending' ? (
+                                    <motion.div
+                                        key="pending"
+                                        initial={{ opacity: 0, x: 20 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        exit={{ opacity: 0, x: -20 }}
+                                        className="space-y-6 flex flex-col items-center justify-center py-8"
+                                    >
+                                        <div className="w-20 h-20 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center shadow-inner">
+                                            <Clock className="w-10 h-10 animate-pulse" />
+                                        </div>
+                                        <div className="text-center space-y-2">
+                                            <h3 className="text-xl font-bold">Awaiting Provider Approval</h3>
+                                            <p className="text-sm text-muted-foreground w-64 mx-auto leading-relaxed">
+                                                Your pickup request has been sent. Once the provider accepts, you'll be able to proceed with payment.
+                                            </p>
+                                        </div>
+                                        <Button
+                                            variant="outline"
+                                            className="w-full h-12 rounded-xl font-bold mt-4 border-2"
+                                            onClick={() => setIsOpen(false)}
+                                        >
+                                            Close
+                                        </Button>
                                     </motion.div>
                                 ) : (
                                     <motion.div

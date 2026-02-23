@@ -59,6 +59,42 @@ const searchLocation = async (req, res, next) => {
   }
 };
 
+const reverseLocation = async (req, res, next) => {
+  try {
+    const { lat, lon } = req.query;
+
+    if (!lat || !lon) {
+      return res.status(400).json({
+        success: false,
+        message: "Latitude and longitude are required",
+      });
+    }
+
+    const response = await axios.get("https://nominatim.openstreetmap.org/reverse", {
+      params: {
+        lat: parseFloat(lat),
+        lon: parseFloat(lon),
+        format: "json",
+        addressdetails: 1,
+        zoom: 10,
+      },
+      headers: {
+        "User-Agent": "LeftOverLink/1.0 (contact@leftoverlink.com)",
+      },
+      timeout: 5000,
+    });
+
+    return res.status(200).json(response.data);
+  } catch (error) {
+    console.error("Nominatim Reverse Error:", error.message);
+    if (error.response) {
+      console.error("Response data:", error.response.data);
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   searchLocation,
+  reverseLocation,
 };

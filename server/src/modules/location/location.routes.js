@@ -1,8 +1,9 @@
 const express = require("express");
-const { searchLocation } = require("./location.controller");
+const { searchLocation, reverseLocation } = require("./location.controller");
 
 const router = express.Router();
 
 router.get("/search", searchLocation);
+router.get("/reverse", reverseLocation);
 
 module.exports = router;

@@ -150,7 +150,16 @@ export function ProviderMapPage() {
         setLoading(false);
       }
     };
+    
     fetchFood();
+
+    // Auto-refetch every 5 seconds to catch new posts
+    const interval = setInterval(() => {
+      console.log('Auto-refetching map data...');
+      fetchFood();
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const center: [number, number] =

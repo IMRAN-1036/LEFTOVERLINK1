@@ -6,7 +6,7 @@ import { Input } from './ui/input';
 import { format, formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import { useLocation } from 'react-router';
-import { ChatMessage } from './ChatDialog'; // Reusing type
+import { chatSyncService, ChatMessage } from '../../shared/chatSync';
 
 
 
@@ -108,27 +108,37 @@ export function GlobalChatWidget() {
         }
     }, [isOpen, activeChat, user]);
 
-    // Load messages when a chat is selected, and poll for new messages every second
+    // Load messages when a chat is selected
     useEffect(() => {
         if (!activeChat) return;
 
-        const storageKey = `chat_${activeChat.orderId}`;
-
         const loadMessages = () => {
-            const saved = localStorage.getItem(storageKey);
-            if (saved) {
-                try {
-                    const parsed = JSON.parse(saved);
-                    setMessages(parsed);
-                } catch { /* ignore parse errors */ }
-            } else {
-                setMessages([]);
-            }
+            setMessages(chatSyncService.getMessages(activeChat.orderId));
         };
 
         loadMessages();
-        const interval = setInterval(loadMessages, 1000);
-        return () => clearInterval(interval);
+
+        // Listen for same-window updates
+        const handleLocalUpdate = (e: any) => {
+            if (e.detail?.orderId === activeChat.orderId) {
+                loadMessages();
+            }
+        };
+
+        // Listen for cross-tab updates
+        const handleStorageUpdate = (e: StorageEvent) => {
+            if (e.key === 'leftoverlink_chats') {
+                loadMessages();
+            }
+        };
+
+        window.addEventListener('local-chat-update', handleLocalUpdate);
+        window.addEventListener('storage', handleStorageUpdate);
+
+        return () => {
+            window.removeEventListener('local-chat-update', handleLocalUpdate);
+            window.removeEventListener('storage', handleStorageUpdate);
+        };
     }, [activeChat]);
 
     // Auto-scroll
@@ -140,23 +150,15 @@ export function GlobalChatWidget() {
         e?.preventDefault();
         if (!inputText.trim() || !activeChat) return;
 
-        const storageKey = `chat_${activeChat.orderId}`;
         const isProviderRole = user?.role === 'provider';
 
-        const newMessage: ChatMessage = {
-            id: Date.now().toString(),
-            text: inputText.trim(),
-            senderId: isProviderRole ? 'provider' : 'receiver',
-            timestamp: new Date(),
-            isProvider: isProviderRole
-        };
+        chatSyncService.sendMessage(
+            activeChat.orderId,
+            isProviderRole ? 'provider' : 'receiver',
+            isProviderRole ? 'provider' : 'receiver',
+            inputText.trim()
+        );
 
-        // Read latest from localStorage to avoid overwriting the other party's messages
-        const latestStr = localStorage.getItem(storageKey);
-        const latestMessages = latestStr ? JSON.parse(latestStr) : [];
-        const updatedMessages = [...latestMessages, newMessage];
-        localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
-        setMessages(updatedMessages);
         setInputText('');
     };
 
@@ -355,7 +357,7 @@ export function GlobalChatWidget() {
                                         <AnimatePresence initial={false}>
                                             {messages.map((msg) => {
                                                 const isProviderRole = user?.role === 'provider';
-                                                const isMe = isProviderRole ? msg.isProvider : !msg.isProvider;
+                                                const isMe = msg.senderRole === (isProviderRole ? 'provider' : 'receiver');
                                                 return (
                                                     <motion.div
                                                         key={msg.id}

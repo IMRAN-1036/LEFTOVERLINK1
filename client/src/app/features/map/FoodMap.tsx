@@ -85,11 +85,11 @@ function MapActionButtons({
             map.flyTo([providerLat, providerLng], 15, { animate: true, duration: 1.5 });
           }}
           className="relative flex items-center justify-center p-3.5 bg-background border-2 border-red-500/80 rounded-2xl shadow-xl hover:bg-red-50 dark:hover:bg-red-950/30 transition-all group scale-100 active:scale-95"
-          aria-label="Your Location"
+          aria-label={userLat != null && userLng != null ? "Food Location" : "Your Location"}
         >
           <MapPin className="w-5 h-5 text-red-600 group-hover:scale-110 transition-transform" />
           <span className="absolute right-full mr-4 whitespace-nowrap bg-zinc-900 dark:bg-zinc-100 text-zinc-50 dark:text-zinc-900 text-xs font-bold px-3 py-2 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity shadow-lg">
-            Your Location
+            {userLat != null && userLng != null ? "Food Location" : "Your Location"}
             <span className="absolute top-1/2 -right-1 -translate-y-1/2 border-[5px] border-transparent border-l-zinc-900 dark:border-l-zinc-100" />
           </span>
         </button>
@@ -151,21 +151,35 @@ export function FoodMap({
     typeof receiverLat === "number" &&
     typeof receiverLng === "number" &&
     receiverLat !== 0 &&
-    receiverLng !== 0;
+    receiverLng !== 0 &&
+    !isNaN(receiverLat) &&
+    !isNaN(receiverLng);
 
   const hasValidCenter =
     typeof centerLat === "number" &&
     typeof centerLng === "number" &&
     centerLat !== 0 &&
-    centerLng !== 0;
+    centerLng !== 0 &&
+    !isNaN(centerLat) &&
+    !isNaN(centerLng);
+
+  // Filter out posts with invalid locations
+  const validPosts = posts.filter(post =>
+    post.location &&
+    typeof post.location.lat === 'number' &&
+    typeof post.location.lng === 'number' &&
+    !isNaN(post.location.lat) &&
+    !isNaN(post.location.lng) &&
+    (post.location.lat !== 0 || post.location.lng !== 0)
+  );
 
   // Prefer user/receiver location as map center; fallback to first post or default
   const center: LatLngExpression = hasReceiver
     ? [receiverLat as number, receiverLng as number]
     : hasValidCenter
       ? [centerLat as number, centerLng as number]
-      : posts.length > 0 && posts[0].location?.lat && posts[0].location?.lng
-        ? [posts[0].location.lat, posts[0].location.lng]
+      : validPosts.length > 0 && validPosts[0].location?.lat && validPosts[0].location?.lng
+        ? [validPosts[0].location.lat, validPosts[0].location.lng]
         : [17.385, 78.4867]; // Default: Hyderabad, India
 
   // Prepare custom receiver icon label 
@@ -211,9 +225,9 @@ export function FoodMap({
         <MapActionButtons
           userLat={hasReceiver ? receiverLat as number : undefined}
           userLng={hasReceiver ? receiverLng as number : undefined}
-          providerLat={posts.length > 0 ? posts[0].location.lat : undefined}
-          providerLng={posts.length > 0 ? posts[0].location.lng : undefined}
-          posts={posts}
+          providerLat={validPosts.length > 0 ? validPosts[0].location.lat : undefined}
+          providerLng={validPosts.length > 0 ? validPosts[0].location.lng : undefined}
+          posts={validPosts}
         />
 
         {hasReceiver && (
@@ -231,7 +245,7 @@ export function FoodMap({
           </>
         )}
 
-        {posts.map((post) => {
+        {validPosts.map((post) => {
           const coords: LatLngExpression = [post.location.lat, post.location.lng];
           const distanceText =
             post.distance != null
