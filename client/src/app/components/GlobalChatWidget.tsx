@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, X, ChevronLeft, Phone, Video, Send, CheckCheck } from 'lucide-react';
+import { MessageCircle, X, ChevronLeft, Phone, Video, Send, CheckCheck, ChevronDown } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -61,6 +61,7 @@ export function GlobalChatWidget() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [inputText, setInputText] = useState('');
     const [isTyping, setIsTyping] = useState(false);
+    const [showScrollDown, setShowScrollDown] = useState(false);
     const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
     const [isMapExpanded, setIsMapExpanded] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -102,11 +103,29 @@ export function GlobalChatWidget() {
     }, [isOpen]);
 
     useEffect(() => {
-        if (isOpen && !activeChat) {
-            const userId = user?.id || (user as any)?._id;
-            setProviders(getUniqueContactsCount(user?.role, userId));
-        }
-    }, [isOpen, activeChat, user]);
+        if (!user) return;
+        const userId = user?.id || (user as any)?._id;
+
+        const updateContactsAndPoll = () => {
+            const contacts = getUniqueContactsCount(user?.role, userId);
+            setProviders(contacts);
+
+            const orderIds = contacts.map(c => c.orderId);
+            if (orderIds.length > 0) {
+                chatSyncService.startGlobalPolling(orderIds);
+            } else {
+                chatSyncService.stopGlobalPolling();
+            }
+        };
+
+        updateContactsAndPoll();
+        window.addEventListener('storage', updateContactsAndPoll);
+
+        return () => {
+            chatSyncService.stopGlobalPolling();
+            window.removeEventListener('storage', updateContactsAndPoll);
+        };
+    }, [user]);
 
     // Load messages when a chat is selected
     useEffect(() => {
@@ -116,34 +135,35 @@ export function GlobalChatWidget() {
             setMessages(chatSyncService.getMessages(activeChat.orderId));
         };
 
+        // If cache is currently empty, fetching will be slightly delayed by startPolling.
+        // We can force an immediate explicit fetch here to guarantee the UI has data.
+        chatSyncService.fetchMessagesExplicitly(activeChat.orderId).then((data) => {
+            if (data) setMessages(data);
+        });
+
+        chatSyncService.startPolling(activeChat.orderId);
         loadMessages();
 
-        // Listen for same-window updates
+        // Listen for internal service updates
         const handleLocalUpdate = (e: any) => {
             if (e.detail?.orderId === activeChat.orderId) {
                 loadMessages();
             }
         };
 
-        // Listen for cross-tab updates
-        const handleStorageUpdate = (e: StorageEvent) => {
-            if (e.key === 'leftoverlink_chats') {
-                loadMessages();
-            }
-        };
-
         window.addEventListener('local-chat-update', handleLocalUpdate);
-        window.addEventListener('storage', handleStorageUpdate);
 
         return () => {
+            chatSyncService.stopPolling(activeChat.orderId);
             window.removeEventListener('local-chat-update', handleLocalUpdate);
-            window.removeEventListener('storage', handleStorageUpdate);
         };
     }, [activeChat]);
 
     // Auto-scroll
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (!showScrollDown) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
     }, [messages, isTyping]);
 
     const handleSendMessage = (e?: React.FormEvent) => {
@@ -300,111 +320,140 @@ export function GlobalChatWidget() {
                                 </div>
                             </div>
 
-                            {/* 2. Main Content Area */}
-                            <div className="flex-1 bg-slate-50 dark:bg-zinc-900 overflow-y-auto">
-                                {!activeChat ? (
-                                    /* Provider List View */
-                                    <motion.div
-                                        initial={{ opacity: 0, x: -20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        className="p-2 space-y-1"
-                                    >
-                                        {providers.length === 0 ? (
-                                            <div className="flex flex-col items-center justify-center p-8 text-center h-full mt-20">
-                                                <MessageCircle className="w-12 h-12 text-muted-foreground/30 mb-4" />
-                                                <p className="text-muted-foreground font-medium">No active conversations.</p>
-                                                <p className="text-xs text-muted-foreground mt-2">Claim food orders to start chatting with providers!</p>
-                                            </div>
-                                        ) : (
-                                            providers.map((provider) => (
-                                                <div
-                                                    key={provider.orderId}
-                                                    onClick={() => setActiveChat({ name: provider.name, orderId: provider.orderId })}
-                                                    className="flex items-center gap-4 p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
-                                                >
-                                                    <div className="relative">
-                                                        <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-green-700 dark:text-green-500 font-bold text-xl">
-                                                            {provider.name.charAt(0).toUpperCase()}
-                                                        </div>
-                                                        <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white dark:border-zinc-900 rounded-full"></span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex justify-between items-baseline mb-0.5">
-                                                            <h4 className="font-bold truncate text-[15px]">{provider.name}</h4>
-                                                            <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">
-                                                                {formatDistanceToNow(provider.lastActive, { addSuffix: true })}
-                                                            </span>
-                                                        </div>
-                                                        <p className="text-sm text-muted-foreground truncate font-medium">
-                                                            Tap to open chat history
-                                                        </p>
-                                                    </div>
+                            {/* 2. Main Content Area — outer wrapper is relative so the arrow can be positioned inside it */}
+                            <div className="flex-1 relative overflow-hidden flex flex-col">
+                                <div
+                                    className="flex-1 bg-slate-50 dark:bg-zinc-900 overflow-y-auto flex flex-col"
+                                    onScroll={(e) => {
+                                        if (!activeChat) return;
+                                        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+                                        setShowScrollDown(scrollHeight - scrollTop - clientHeight > 100);
+                                    }}
+                                >
+                                    {!activeChat ? (
+                                        /* Provider List View */
+                                        <motion.div
+                                            initial={{ opacity: 0, x: -20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            className="p-2 space-y-1"
+                                        >
+                                            {providers.length === 0 ? (
+                                                <div className="flex flex-col items-center justify-center p-8 text-center h-full mt-20">
+                                                    <MessageCircle className="w-12 h-12 text-muted-foreground/30 mb-4" />
+                                                    <p className="text-muted-foreground font-medium">No active conversations.</p>
+                                                    <p className="text-xs text-muted-foreground mt-2">Claim food orders to start chatting with providers!</p>
                                                 </div>
-                                            ))
-                                        )}
-                                    </motion.div>
-                                ) : (
-                                    /* Active Chat Messages View */
-                                    <motion.div
-                                        initial={{ opacity: 0, x: 20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        className="p-4 space-y-4"
-                                    >
-                                        <div className="text-center text-xs text-muted-foreground my-4 font-black uppercase tracking-widest bg-black/5 dark:bg-white/5 rounded-full py-1 px-3 w-max mx-auto">
-                                            Today
-                                        </div>
-
-                                        <AnimatePresence initial={false}>
-                                            {messages.map((msg) => {
-                                                const isProviderRole = user?.role === 'provider';
-                                                const isMe = msg.senderRole === (isProviderRole ? 'provider' : 'receiver');
-                                                return (
-                                                    <motion.div
-                                                        key={msg.id}
-                                                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                                                        className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                                            ) : (
+                                                providers.map((provider) => (
+                                                    <div
+                                                        key={provider.orderId}
+                                                        onClick={() => setActiveChat({ name: provider.name, orderId: provider.orderId })}
+                                                        className="flex items-center gap-4 p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
                                                     >
-                                                        <div className={`max-w-[80%] flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                                                            <div
-                                                                className={`px-4 py-2.5 shadow-sm text-[15px] leading-relaxed ${isMe
-                                                                    ? 'bg-green-600 text-white rounded-2xl rounded-tr-sm'
-                                                                    : 'bg-white dark:bg-zinc-800 border border-border/50 text-foreground rounded-2xl rounded-tl-sm'
-                                                                    }`}
-                                                            >
-                                                                {msg.text}
+                                                        <div className="relative">
+                                                            <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-green-700 dark:text-green-500 font-bold text-xl">
+                                                                {provider.name.charAt(0).toUpperCase()}
                                                             </div>
-                                                            <div className="flex items-center gap-1 mt-1 px-1">
-                                                                <span className="text-[10px] text-muted-foreground/70 font-semibold">
-                                                                    {format(new Date(msg.timestamp), 'h:mm a')}
-                                                                </span>
-                                                                {isMe && <CheckCheck className="w-3.5 h-3.5 text-green-600" />}
-                                                            </div>
+                                                            <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white dark:border-zinc-900 rounded-full"></span>
                                                         </div>
-                                                    </motion.div>
-                                                );
-                                            })}
-                                        </AnimatePresence>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex justify-between items-baseline mb-0.5">
+                                                                <h4 className="font-bold truncate text-[15px]">{provider.name}</h4>
+                                                                <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">
+                                                                    {formatDistanceToNow(provider.lastActive, { addSuffix: true })}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-sm text-muted-foreground truncate font-medium">
+                                                                Tap to open chat history
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </motion.div>
+                                    ) : (
+                                        /* Active Chat Messages View */
+                                        <motion.div
+                                            initial={{ opacity: 0, x: 20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            className="p-4 space-y-4"
+                                        >
+                                            <div className="text-center text-xs text-muted-foreground my-4 font-black uppercase tracking-widest bg-black/5 dark:bg-white/5 rounded-full py-1 px-3 w-max mx-auto">
+                                                Today
+                                            </div>
 
-                                        {/* Typing Indicator */}
-                                        {isTyping && (
-                                            <motion.div
-                                                initial={{ opacity: 0, scale: 0.9 }}
-                                                animate={{ opacity: 1, scale: 1 }}
-                                                exit={{ opacity: 0, scale: 0.9 }}
-                                                className="flex justify-start"
+                                            <AnimatePresence initial={false}>
+                                                {messages.map((msg) => {
+                                                    const isProviderRole = user?.role === 'provider';
+                                                    const isMe = msg.senderRole === (isProviderRole ? 'provider' : 'receiver');
+                                                    return (
+                                                        <motion.div
+                                                            key={msg.id}
+                                                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                            className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                                                        >
+                                                            <div className={`max-w-[80%] flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                                                                <div
+                                                                    className={`px-4 py-2.5 shadow-sm text-[15px] leading-relaxed ${isMe
+                                                                        ? 'bg-green-600 text-white rounded-2xl rounded-tr-sm'
+                                                                        : 'bg-white dark:bg-zinc-800 border border-border/50 text-foreground rounded-2xl rounded-tl-sm'
+                                                                        }`}
+                                                                >
+                                                                    {msg.text}
+                                                                </div>
+                                                                <div className="flex items-center gap-1 mt-1 px-1">
+                                                                    <span className="text-[10px] text-muted-foreground/70 font-semibold">
+                                                                        {format(new Date(msg.timestamp), 'h:mm a')}
+                                                                    </span>
+                                                                    {isMe && <CheckCheck className="w-3.5 h-3.5 text-green-600" />}
+                                                                </div>
+                                                            </div>
+                                                        </motion.div>
+                                                    );
+                                                })}
+                                            </AnimatePresence>
+
+                                            {/* Typing Indicator */}
+                                            {isTyping && (
+                                                <motion.div
+                                                    initial={{ opacity: 0, scale: 0.9 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    exit={{ opacity: 0, scale: 0.9 }}
+                                                    className="flex justify-start"
+                                                >
+                                                    <div className="bg-white dark:bg-zinc-800 border border-border/50 rounded-2xl rounded-tl-sm px-4 py-3.5 shadow-sm flex items-center gap-1.5">
+                                                        <motion.div className="w-1.5 h-1.5 bg-green-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} />
+                                                        <motion.div className="w-1.5 h-1.5 bg-green-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} />
+                                                        <motion.div className="w-1.5 h-1.5 bg-green-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} />
+                                                    </div>
+                                                </motion.div>
+                                            )}
+
+                                            <div ref={messagesEndRef} />
+                                        </motion.div>
+                                    )}
+                                </div>
+
+                                {/* Auto Scroll Button — absolute inside the outer non-scrolling wrapper */}
+                                <AnimatePresence>
+                                    {activeChat && showScrollDown && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                                            className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none z-50"
+                                        >
+                                            <Button
+                                                type="button"
+                                                onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                                                className="rounded-full shadow-lg bg-green-600/90 backdrop-blur-sm hover:bg-green-700 text-white pointer-events-auto h-9 w-9 p-0 flex items-center justify-center transition-transform hover:scale-110"
                                             >
-                                                <div className="bg-white dark:bg-zinc-800 border border-border/50 rounded-2xl rounded-tl-sm px-4 py-3.5 shadow-sm flex items-center gap-1.5">
-                                                    <motion.div className="w-1.5 h-1.5 bg-green-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} />
-                                                    <motion.div className="w-1.5 h-1.5 bg-green-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} />
-                                                    <motion.div className="w-1.5 h-1.5 bg-green-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} />
-                                                </div>
-                                            </motion.div>
-                                        )}
-
-                                        <div ref={messagesEndRef} />
-                                    </motion.div>
-                                )}
+                                                <ChevronDown className="h-5 w-5" />
+                                            </Button>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
                             </div>
 
                             {/* 3. Input Area (Only visible in Active Chat) */}

@@ -1,53 +1,157 @@
+import api from '../app/api/axios';
+
 export interface ChatMessage {
     id: string;
     orderId: string;
-    senderId: string; // The user ID sending the message
+    senderId: string;
     senderRole: 'provider' | 'receiver';
     text: string;
     timestamp: number;
 }
 
-const CHAT_STORAGE_KEY = 'leftoverlink_chats';
+// In-memory cache to store polling results for UI components to read synchronously
+let messageCache: Record<string, ChatMessage[]> = {};
+let pollingIntervals: Record<string, ReturnType<typeof setInterval>> = {};
+let globalPollingInterval: ReturnType<typeof setInterval> | null = null;
 
 export const chatSyncService = {
+    /**
+     * Synchronous getter for UI components. Relies on the active polling cache.
+     */
     getMessages: (orderId: string): ChatMessage[] => {
+        return messageCache[orderId] || [];
+    },
+
+    /**
+     * Asynchronous getter to explicitly force a server fetch and cache update.
+     * Useful for initial mounts before polling cycles establish.
+     */
+    fetchMessagesExplicitly: async (orderId: string): Promise<ChatMessage[] | null> => {
         try {
-            const raw = localStorage.getItem(CHAT_STORAGE_KEY);
-            if (!raw) return [];
-            const allMessages: ChatMessage[] = JSON.parse(raw);
-            return allMessages.filter(msg => msg.orderId === orderId).sort((a, b) => a.timestamp - b.timestamp);
-        } catch (e) {
-            console.error("Failed to parse chat messages", e);
-            return [];
+            const res = await api.get(`/chat/${orderId}`);
+            messageCache[orderId] = res.data;
+            
+            window.dispatchEvent(new CustomEvent('local-chat-update', { 
+                detail: { orderId } 
+            }));
+
+            await api.put(`/chat/${orderId}/read`);
+            return res.data;
+        } catch (err) {
+            console.error("Failed explicit chat fetch", err);
+            return null;
         }
     },
 
-    sendMessage: (orderId: string, senderId: string, senderRole: 'provider' | 'receiver', text: string) => {
+    /**
+     * Starts background HTTP polling against MongoDB and triggers DOM updates
+     */
+    startPolling: (orderId: string) => {
+        if (pollingIntervals[orderId]) return; // Already polling
+
+        const fetchMessages = async () => {
+            try {
+                const res = await api.get(`/chat/${orderId}`);
+                messageCache[orderId] = res.data;
+                
+                // Trigger UI update
+                window.dispatchEvent(new CustomEvent('local-chat-update', { 
+                    detail: { orderId } 
+                }));
+
+                // Mark as read upon accessing
+                await api.put(`/chat/${orderId}/read`);
+            } catch (err) {
+                console.error("Failed to fetch chat messages from DB", err);
+            }
+        };
+
+        fetchMessages(); // initial grab
+        pollingIntervals[orderId] = setInterval(fetchMessages, 2000); // Poll every 2 seconds
+    },
+
+    /**
+     * Cleans up the background HTTP polling
+     */
+    stopPolling: (orderId: string) => {
+        if (pollingIntervals[orderId]) {
+            clearInterval(pollingIntervals[orderId]);
+            delete pollingIntervals[orderId];
+        }
+    },
+
+    /**
+     * Starts background polling for ANY unread messages across provided orders
+     */
+    startGlobalPolling: (orderIds: string[]) => {
+        chatSyncService.stopGlobalPolling();
+        
+        if (!orderIds || orderIds.length === 0) return;
+
+        const checkUnread = async () => {
+            try {
+                const res = await api.post('/chat/unread', { orderIds });
+                
+                if (res.data.hasUnread) {
+                    localStorage.setItem('chat_has_unread', 'true');
+                    window.dispatchEvent(new Event('chat_unread_update'));
+                } else {
+                    localStorage.setItem('chat_has_unread', 'false');
+                    window.dispatchEvent(new Event('chat_unread_update'));
+                }
+            } catch (err) {
+                console.error("Failed to check global unread status", err);
+            }
+        };
+
+        checkUnread();
+        globalPollingInterval = setInterval(checkUnread, 5000); // Poll every 5 seconds
+    },
+
+    stopGlobalPolling: () => {
+        if (globalPollingInterval) {
+            clearInterval(globalPollingInterval);
+            globalPollingInterval = null;
+        }
+    },
+
+    sendMessage: async (orderId: string, senderId: string, senderRole: 'provider' | 'receiver', text: string) => {
         try {
-            const newMessage: ChatMessage = {
-                id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            // Optimistic UI update
+            const optimisticMsg: ChatMessage = {
+                id: `temp_${Date.now()}`,
                 orderId,
                 senderId,
                 senderRole,
                 text,
                 timestamp: Date.now()
             };
-
-            const raw = localStorage.getItem(CHAT_STORAGE_KEY);
-            const allMessages: ChatMessage[] = raw ? JSON.parse(raw) : [];
-            allMessages.push(newMessage);
-
-            // Save to localStorage
-            localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(allMessages));
             
-            // To trigger effects in the same window (localStorage event only fires for OTHER windows)
+            if (!messageCache[orderId]) messageCache[orderId] = [];
+            messageCache[orderId].push(optimisticMsg);
+            
             window.dispatchEvent(new CustomEvent('local-chat-update', { 
                 detail: { orderId } 
             }));
+
+            // Actual DB Post
+            const res = await api.post(`/chat/${orderId}`, {
+                senderId,
+                senderRole,
+                text
+            });
             
-            return newMessage;
+            // Re-fetch to ensure sync completeness
+            const refetchRes = await api.get(`/chat/${orderId}`);
+            messageCache[orderId] = refetchRes.data;
+            
+            window.dispatchEvent(new CustomEvent('local-chat-update', { 
+                detail: { orderId } 
+            }));
+
+            return res.data;
         } catch (e) {
-            console.error("Failed to save chat message", e);
+            console.error("Failed to save chat message to DB", e);
             return null;
         }
     }

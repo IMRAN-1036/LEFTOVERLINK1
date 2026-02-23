@@ -2,6 +2,7 @@ const authRoutes = require("../modules/auth/auth.routes");
 const foodRoutes = require("../modules/food/food.routes");
 const locationRoutes = require("../modules/location/location.routes");
 const analyticsRoutes = require("../modules/analytics/analytics.routes");
+const chatRoutes = require("../modules/chat/chat.routes");
 
 const { authRateLimiter } = require("../middleware/rateLimiter");
 
@@ -10,6 +11,7 @@ const registerRoutes = (app) => {
   app.use("/api/food", foodRoutes);
   app.use("/api/location", locationRoutes);
   app.use("/api/analytics", analyticsRoutes);
+  app.use("/api/chat", chatRoutes);
 
   // Placeholder modules for future expansion:
   // app.use("/api/pickups", pickupRoutes);
