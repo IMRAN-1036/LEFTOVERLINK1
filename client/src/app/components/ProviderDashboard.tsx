@@ -65,7 +65,7 @@ export function ProviderDashboard() {
                 location: f.location || { lat: 0, lng: 0, address: 'Unknown' }
             }));
             setListings(myListings);
-            
+
             // Load pending requests count
             loadPendingRequestsCount();
         } catch (err) {
@@ -73,23 +73,15 @@ export function ProviderDashboard() {
         }
     };
     const { user, logout, isLoading } = useAuth();
-    
+
     // State for pending requests count
     const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
-    
-    const loadPendingRequestsCount = () => {
+
+    const loadPendingRequestsCount = async () => {
         try {
-            const history = localStorage.getItem('pickupHistory');
-            if (history && user) {
-                const allHistory = JSON.parse(history);
-                const pendingCount = allHistory.filter((order: any) => {
-                    const pid = String(order.providerId);
-                    const uid = String(user.id || (user as any)._id);
-                    const matchesProvider = pid === uid || order.providerName === user.name;
-                    return matchesProvider && order.requestStatus === 'pending';
-                }).length;
-                setPendingRequestsCount(pendingCount);
-            }
+            const res = await api.get('/orders/provider');
+            const pendingCount = (res.data as any[]).filter((o: any) => o.requestStatus === 'pending').length;
+            setPendingRequestsCount(pendingCount);
         } catch (err) {
             console.error('Failed to load pending requests count', err);
         }

@@ -56,27 +56,22 @@ export function WalletPage() {
     useEffect(() => {
         const fetchUserWallet = async () => {
             try {
-                const res = await api.get('/auth/me');
-                // Map backend user wallet to ReceiverWallet structure
-                const user = res.data;
+                const res = await api.get('/wallet');
+                // Map backend wallet to ReceiverWallet structure
                 const mappedWallet = {
-                    points: user.points || 0,
-                    balanceINR: user.wallet || 0,
-                    totalOrders: user.totalOrders || 0,
-                    totalPointsEarned: user.totalPointsEarned || 0,
-                    transactions: user.transactions || []
+                    points: res.data.points || 0,
+                    balanceINR: res.data.balanceINR || 0,
+                    totalOrders: 0,
+                    totalPointsEarned: res.data.points || 0,
+                    transactions: []
                 };
                 setWallet(mappedWallet as any);
             } catch (err) {
-                console.error(err);
-                // fallback to localStorage as before
-                const saved = localStorage.getItem('receiverWallet');
-                if (saved) {
-                    setWallet(JSON.parse(saved));
-                }
+                console.error('Failed to load wallet:', err);
+                // Fallback minimal shape so UI doesn't crash
+                setWallet({ points: 0, balanceINR: 0, totalOrders: 0, totalPointsEarned: 0, transactions: [] } as any);
             }
         };
-
         fetchUserWallet();
     }, []);
 
@@ -98,28 +93,12 @@ export function WalletPage() {
             const amountToRedeem = wallet.points;
             const amountINR = wallet.balanceINR;
 
-            const newTransaction: WalletTransaction = {
-                id: `tr-${Date.now()}`,
-                userId: 'user-1',
-                type: 'redemption',
-                amount: amountToRedeem,
-                amountINR: amountINR,
-                description: `Redeemed to bank account (${bankDetails.bankName})`,
-                status: 'completed',
-                timestamp: new Date(),
-                recipientDetails: bankDetails
-            };
+            // Deduct on the server side (award negative points)
+            await api.post('/wallet/award', { points: -amountToRedeem });
 
-            const updatedWallet = {
-                ...wallet,
-                points: 0,
-                balanceINR: 0,
-                transactions: [newTransaction, ...wallet.transactions]
-            };
-
-            localStorage.setItem('receiverWallet', JSON.stringify(updatedWallet));
-            setWallet(updatedWallet);
-            toast.success(`Successfully redeemed ₹${amountINR} to your bank account!`);
+            // Reflect change locally
+            setWallet({ ...wallet, points: 0, balanceINR: 0 });
+            toast.success(`Successfully redeemed ₹${amountINR.toFixed(2)} to your bank account!`);
         }
 
         setIsProcessing(false);
@@ -142,29 +121,17 @@ export function WalletPage() {
         await new Promise(resolve => setTimeout(resolve, 1500));
 
         if (wallet) {
-            const pointsToDonate = amount * 50;
+            const pointsToDonate = Math.round(amount * 50);
 
-            const newTransaction: WalletTransaction = {
-                id: `tr-${Date.now()}`,
-                userId: 'user-1',
-                type: 'donation',
-                amount: pointsToDonate,
-                amountINR: amount,
-                description: `Donated to ${selectedCause}`,
-                status: 'completed',
-                timestamp: new Date(),
-                recipientDetails: { cause: selectedCause }
-            };
+            // Deduct on the server side
+            await api.post('/wallet/award', { points: -pointsToDonate });
 
-            const updatedWallet = {
+            // Reflect change locally
+            setWallet({
                 ...wallet,
                 points: wallet.points - pointsToDonate,
-                balanceINR: (wallet.points - pointsToDonate) / 50,
-                transactions: [newTransaction, ...wallet.transactions]
-            };
-
-            localStorage.setItem('receiverWallet', JSON.stringify(updatedWallet));
-            setWallet(updatedWallet);
+                balanceINR: parseFloat(((wallet.points - pointsToDonate) / 50).toFixed(2)),
+            });
             toast.success(`Thank you! You donated ₹${amount} to ${selectedCause}.`);
         }
 

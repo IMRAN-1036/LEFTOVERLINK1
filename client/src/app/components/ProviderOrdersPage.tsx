@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import api from '../api/axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Header } from './Header';
 import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, MessageCircle, Info, Users } from 'lucide-react';
@@ -33,32 +34,19 @@ export function ProviderOrdersPage() {
     useEffect(() => {
         if (!user || user.role !== 'provider') return;
 
-        // Load orders purely from localStorage to match existing application logic
-        const loadOrders = () => {
+        const loadOrders = async () => {
             try {
-                const history = localStorage.getItem('pickupHistory');
-                if (history) {
-                    const allHistory = JSON.parse(history);
-                    // Filter only orders where this provider was the source, or if no providerId is set, assume it was them for demo purposes.
-                    const myProvidedOrders = allHistory.filter((order: any) => {
-                        const pid = String(order.providerId);
-                        const uid = String(user.id || (user as any)._id);
-                        const matchesProvider = pid === uid || order.providerName === user.name;
-                        const isAccepted = !order.requestStatus || order.requestStatus === 'accepted';
-                        return matchesProvider && isAccepted;
-                    });
-                    setOrders(myProvidedOrders);
-                }
+                const res = await api.get('/orders/provider');
+                // Show only accepted orders on this "shared food" page
+                const accepted = (res.data as any[]).filter((o: any) => o.requestStatus === 'accepted');
+                setOrders(accepted);
             } catch (err) {
-                console.error("Failed to parse orders", err);
+                console.error("Failed to load orders", err);
             } finally {
                 setIsLoading(false);
             }
         };
-
-        // Small delay to simulate loading for premium feel
-        const timeoutId = setTimeout(loadOrders, 600);
-        return () => clearTimeout(timeoutId);
+        loadOrders();
     }, [user]);
 
     const handleOpenChat = (orderId: string, receiverName: string) => {

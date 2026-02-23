@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
+import api from '../api/axios';
 import { CheckCircle, Star, Award, Leaf } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
@@ -15,23 +16,28 @@ export function PickupConfirmationPage() {
   const [feedback, setFeedback] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Get actual pickup data from storage
-  const pickupHistory = JSON.parse(localStorage.getItem('pickupHistory') || '[]');
-  const latestPickup = pickupHistory[0] || {
+  const [pickup, setPickup] = useState({
     id: '0',
     providerName: 'Sample Provider',
     foodType: 'Food Item',
     quantity: 0,
     address: 'Unknown Location',
-  };
+  });
 
-  const pickup = {
-    id: latestPickup.id,
-    providerName: latestPickup.providerName,
-    foodType: latestPickup.foodType,
-    quantity: latestPickup.mealsCount || latestPickup.impact || 0,
-    address: latestPickup.location?.address || 'Location provided during pickup',
-  };
+  useEffect(() => {
+    api.get('/orders/mine').then(res => {
+      const latest = res.data[0];
+      if (latest) {
+        setPickup({
+          id: latest.id,
+          providerName: latest.providerName,
+          foodType: latest.foodType,
+          quantity: latest.numberOfMeals || 0,
+          address: latest.receiverLocation?.address || 'Location provided during pickup',
+        });
+      }
+    }).catch(() => { });
+  }, []);
 
   const handleConfirm = async () => {
     if (rating === 0) {

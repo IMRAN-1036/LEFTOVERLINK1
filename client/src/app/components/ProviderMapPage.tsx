@@ -33,13 +33,20 @@ function ProviderMapButtons({ posts }: { posts: MapPost[] }) {
         setUserLat(pos.coords.latitude);
         setUserLng(pos.coords.longitude);
       },
-      () => {
-        // Fallback to settings
+      async () => {
+        // Fallback to settings from MongoDB
         try {
-          const settings = JSON.parse(localStorage.getItem('userSettings') || '{}');
-          if (settings.lat && settings.lng) {
-            setUserLat(settings.lat);
-            setUserLng(settings.lng);
+          const apiRoot = ((import.meta as any)?.env?.VITE_API_URL as string) || 'http://localhost:5001';
+          const token = localStorage.getItem('token');
+          const res = await fetch(`${apiRoot}/api/auth/settings`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          });
+          if (res.ok) {
+            const settings = await res.json();
+            if (settings.lat && settings.lng) {
+              setUserLat(settings.lat);
+              setUserLng(settings.lng);
+            }
           }
         } catch { }
       }
@@ -150,7 +157,7 @@ export function ProviderMapPage() {
         setLoading(false);
       }
     };
-    
+
     fetchFood();
 
     // Auto-refetch every 5 seconds to catch new posts

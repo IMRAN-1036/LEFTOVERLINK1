@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import api from '../../app/api/axios';
 import { Badge } from '../../app/components/ui/badge';
 import { Button } from '../../app/components/ui/button';
 import { Card } from '../../app/components/ui/card';
@@ -32,46 +33,26 @@ export function FoodList({ posts, onSelectPost, onContinuePayment, onOpenChat, o
     const [pendingRequests, setPendingRequests] = useState<Record<string, any>>({});
 
     useEffect(() => {
-        const updatePendingRequests = () => {
+        const loadOrders = async () => {
             try {
-                const historyStr = localStorage.getItem('pickupHistory');
-                const userStr = localStorage.getItem('user');
-                if (historyStr && userStr) {
-                    const history = JSON.parse(historyStr);
-                    const user = JSON.parse(userStr);
-                    const now = Date.now();
-                    const pending: Record<string, any> = {};
-                    let changed = false;
-
-                    const updatedHistory = history.map((item: any) => {
-                        const uid = user.id || user._id;
-                        if (item.receiverId === uid) {
-                            if (item.requestStatus === 'pending') {
-                                if (item.requestExpiry > now) {
-                                    pending[item.foodPostId] = item;
-                                } else {
-                                    item.requestStatus = 'expired';
-                                    changed = true;
-                                }
-                            } else if (item.requestStatus === 'accepted' && item.paymentStatus === 'pending') {
-                                pending[item.foodPostId] = item;
-                            }
-                        }
-                        return item;
-                    });
-
-                    if (changed) {
-                        localStorage.setItem('pickupHistory', JSON.stringify(updatedHistory));
+                const res = await api.get('/orders/mine');
+                const now = Date.now();
+                const pending: Record<string, any> = {};
+                (res.data as any[]).forEach((item: any) => {
+                    if (item.requestStatus === 'pending') {
+                        const expiry = item.requestExpiry ? new Date(item.requestExpiry).getTime() : 0;
+                        if (expiry > now) pending[item.foodPostId] = item;
+                    } else if (item.requestStatus === 'accepted' && item.paymentStatus === 'pending') {
+                        pending[item.foodPostId] = item;
                     }
-                    setPendingRequests(pending);
-                }
+                });
+                setPendingRequests(pending);
             } catch (e) {
-                console.error(e);
+                console.error('Failed to load orders:', e);
             }
         };
-
-        updatePendingRequests();
-        const interval = setInterval(updatePendingRequests, 1000);
+        loadOrders();
+        const interval = setInterval(loadOrders, 5000);
         return () => clearInterval(interval);
     }, []);
 

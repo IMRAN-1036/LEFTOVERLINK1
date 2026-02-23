@@ -84,32 +84,27 @@ export function PickupDialog({
         try {
             const billing = calculateBilling(meals);
             const user = JSON.parse(localStorage.getItem('user') || '{}');
-            const settingsData = JSON.parse(localStorage.getItem('userSettings') || '{}');
 
-            const newPickup = {
-                id: `p-${Date.now()}`,
+            // Fetch receiver location settings from DB
+            let receiverLocation = { lat: 17.3850, lng: 78.4867 };
+            try {
+                const settingsRes = await api.get('/auth/settings');
+                if (settingsRes.data?.lat) receiverLocation = { lat: settingsRes.data.lat, lng: settingsRes.data.lng };
+            } catch { /* use defaults */ }
+
+            await api.post('/orders', {
                 foodPostId: selectedFood?.id,
                 providerId: selectedFood?.providerId,
                 providerName: selectedFood?.providerName,
-                receiverId: user.id,
                 receiverName: user.name,
                 numberOfMeals: meals,
                 totalPrice: billing.totalAmount,
                 foodType: selectedFood?.foodType,
-                paymentMethod: 'pending',
-                paymentStatus: 'pending',
                 distance: selectedFood?.distance,
                 expectedTime: expectedTime,
-                requestStatus: 'pending',
-                requestExpiry: Date.now() + 15 * 60 * 1000, // 15 mins expiry for request
-                receiverLocation: {
-                    lat: settingsData.lat || 17.3850,
-                    lng: settingsData.lng || 78.4867
-                }
-            };
-
-            const history = JSON.parse(localStorage.getItem('pickupHistory') || '[]');
-            localStorage.setItem('pickupHistory', JSON.stringify([newPickup, ...history]));
+                requestExpiry: Date.now() + 15 * 60 * 1000,
+                receiverLocation,
+            });
 
             toast.success('Pickup request sent to provider! Awaiting confirmation.');
             setIsOpen(false);
@@ -179,101 +174,19 @@ export function PickupDialog({
             await api.put(`/food/claim/${selectedFood.id}`, { requestedMeals: meals });
 
             const billing = calculateBilling(meals);
-            const user = JSON.parse(localStorage.getItem('user') || '{}');
 
-            // If we are paying for an existing order, update it
+            // Update order payment status in MongoDB
             if (existingOrder) {
-                const history = JSON.parse(localStorage.getItem('pickupHistory') || '[]');
-                const updatedHistory = history.map((item: any) => {
-                    if (item.id === existingOrder.id) {
-                        return {
-                            ...item,
-                            paymentMethod: paymentMethod,
-                            paymentStatus: paymentMethod === 'cod' ? 'pending' : 'completed',
-                            pickupTime: new Date()
-                        };
-                    }
-                    return item;
-                });
-                localStorage.setItem('pickupHistory', JSON.stringify(updatedHistory));
-            } else {
-                // Fallback if no existing order (shouldn't happen in the new flow, but just in case)
-                const settingsData = JSON.parse(localStorage.getItem('userSettings') || '{}');
-                const newPickup = {
-                    id: `p-${Date.now()}`,
-                    foodPostId: selectedFood.id,
-                    providerId: selectedFood.providerId,
-                    providerName: selectedFood.providerName,
-                    receiverId: user.id,
-                    receiverName: user.name,
-                    numberOfMeals: meals,
-                    totalPrice: billing.totalAmount,
-                    pickupTime: new Date(),
-                    confirmed: true,
-                    foodType: selectedFood.foodType,
-                    paymentMethod: paymentMethod,
+                await api.put(`/orders/${existingOrder.id}/payment`, {
+                    paymentMethod,
                     paymentStatus: paymentMethod === 'cod' ? 'pending' : 'completed',
-                    distance: selectedFood.distance,
-                    expectedTime: expectedTime || existingOrder?.expectedTime,
-                    requestStatus: 'accepted',
-                    requestExpiry: Date.now() + 5 * 60 * 1000,
-                    receiverLocation: {
-                        lat: settingsData.lat || 17.3850,
-                        lng: settingsData.lng || 78.4867
-                    }
-                };
-                const history = JSON.parse(localStorage.getItem('pickupHistory') || '[]');
-                localStorage.setItem('pickupHistory', JSON.stringify([newPickup, ...history]));
+                });
             }
-
-            const paymentRecord: PaymentRecord = {
-                id: `pay-${Date.now()}`,
-                receiverId: user.id,
-                foodId: selectedFood.id,
-                numberOfMeals: meals,
-                totalPrice: billing.totalAmount,
-                paymentMethod: paymentMethod!,
-                paymentStatus: paymentMethod === 'cod' ? 'pending' : 'completed',
-                paymentDetails: paymentData,
-                timestamp: new Date()
-            };
 
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            const payments = JSON.parse(localStorage.getItem('paymentHistory') || '[]');
-            localStorage.setItem('paymentHistory', JSON.stringify([paymentRecord, ...payments]));
-
-            const walletStr = localStorage.getItem('receiverWallet');
-            let wallet = walletStr ? JSON.parse(walletStr) : {
-                points: 100,
-                balanceINR: 2,
-                totalOrders: 0,
-                totalPointsEarned: 100,
-                transactions: []
-            };
-
-            const awardedPoints = 50;
-            const newTransaction = {
-                id: `tr-${Date.now()}`,
-                userId: user.id,
-                type: 'earning',
-                amount: awardedPoints,
-                amountINR: awardedPoints / 50,
-                description: `Earned for ${selectedFood.foodType} pickup`,
-                status: 'completed',
-                timestamp: new Date()
-            };
-
-            const updatedWallet = {
-                ...wallet,
-                points: wallet.points + awardedPoints,
-                balanceINR: (wallet.points + awardedPoints) / 50,
-                totalOrders: wallet.totalOrders + 1,
-                totalPointsEarned: wallet.totalPointsEarned + awardedPoints,
-                transactions: [newTransaction, ...wallet.transactions]
-            };
-
-            localStorage.setItem('receiverWallet', JSON.stringify(updatedWallet));
+            // Award points in MongoDB
+            await api.post('/wallet/award', { points: 50 });
 
             setIsSubmittingPickup(false);
             setIsOpen(false);

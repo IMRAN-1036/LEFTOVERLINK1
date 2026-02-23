@@ -272,23 +272,18 @@ export function ReceiverDashboard() {
             console.error('Failed to increment view count', error);
         }
 
-        const historyStr = localStorage.getItem('pickupHistory');
-        const userStr = localStorage.getItem('user');
-        let foundOrder = null;
-
-        if (historyStr && userStr) {
-            const history = JSON.parse(historyStr);
-            const user = JSON.parse(userStr);
-            const uid = user.id || user._id;
-
-            foundOrder = history.find((i: any) =>
+        try {
+            const res = await api.get('/orders/mine');
+            const orders: any[] = res.data;
+            const foundOrder = orders.find((i: any) =>
                 i.foodPostId === post.id &&
-                i.receiverId === uid &&
                 (i.requestStatus === 'pending' || (i.requestStatus === 'accepted' && i.paymentStatus === 'pending'))
             );
+            setExistingOrder(foundOrder || null);
+        } catch {
+            setExistingOrder(null);
         }
 
-        setExistingOrder(foundOrder || null);
         setSelectedFood(post as any);
         setIsPickupDialogOpen(true);
     };

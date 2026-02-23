@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, memo, ReactNode } from 'react';
 import { useNavigate } from 'react-router';
+import api from '../api/axios';
 import { useTheme } from 'next-themes';
 import { useLocation } from '../hooks/useLocation';
 import {
@@ -154,51 +155,45 @@ export function SettingsPage() {
 
   const { detectLocation, isDetecting } = useLocation();
 
-  // Load settings from localStorage and API
+  // Load settings from API and user context
   useEffect(() => {
-    // First, try to load user profile from API
     (async () => {
       try {
         if (!token) return;
-
+        // Load profile from /auth/me
         const apiRoot = ((import.meta as any)?.env?.VITE_API_URL as string) || 'http://localhost:5001';
         const res = await fetch(`${apiRoot}/api/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
-          const user = await res.json();
+          const userData = await res.json();
           setSettings((prev: any) => ({
             ...prev,
-            name: user.name || '',
-            email: user.email || '',
-            role: user.role || '',
-            verified: user.verified || false,
+            name: userData.name || '',
+            email: userData.email || '',
+            role: userData.role || '',
+            verified: userData.verified || false,
+          }));
+        }
+        // Load location settings from /auth/settings (MongoDB)
+        const settingsRes = await api.get('/auth/settings');
+        if (settingsRes.data) {
+          const s = settingsRes.data;
+          setSettings((prev: any) => ({
+            ...prev,
+            lat: s.lat || prev.lat,
+            lng: s.lng || prev.lng,
+            address: s.address || prev.address,
+            maxDistance: s.maxDistance || prev.maxDistance,
+            notificationsEnabled: s.notificationsEnabled ?? prev.notificationsEnabled,
           }));
         }
       } catch (err) {
-        // ignore
+        // ignore — fall back on user context
       }
     })();
 
-    // Then load saved settings from localStorage (location preferences, etc.)
-    const savedSettings = localStorage.getItem('userSettings');
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setSettings((prev: any) => ({
-          ...prev,
-          ...parsed,
-          // Don't override API-loaded user data unless localStorage has newer values
-          name: parsed.name || prev.name,
-          email: parsed.email || prev.email,
-          role: parsed.role || prev.role,
-        }));
-      } catch (e) {
-        console.error('Failed to parse userSettings:', e);
-      }
-    }
-
-    // Fallback: load role from user context if API didn't provide it
+    // Fallback from user context
     if (user) {
       setSettings((prev: any) => ({
         ...prev,
@@ -223,7 +218,12 @@ export function SettingsPage() {
         address: location.address
       };
       setSettings(newSettings);
-      saveToStorage(newSettings);
+      updateSettings(newSettings);
+      updateUser({ name: newSettings.name, role: newSettings.role });
+      // Persist location to MongoDB
+      try {
+        await api.put('/auth/settings', { lat: location.lat, lng: location.lng, address: location.address });
+      } catch (err) { console.error('Failed to save location:', err); }
       toast.success('Location updated successfully', {
         description: `Detected: ${location.address}`
       });
@@ -239,8 +239,18 @@ export function SettingsPage() {
     chatRef.current?.open();
   };
 
-  const handleSave = () => {
-    saveToStorage(settings);
+  const handleSave = async () => {
+    updateSettings(settings);
+    updateUser({ name: settings.name, role: settings.role });
+    // Persist location settings to MongoDB
+    try {
+      await api.put('/auth/settings', {
+        lat: settings.lat,
+        lng: settings.lng,
+        address: settings.address,
+        maxDistance: settings.alertRadius ? parseInt(settings.alertRadius) : undefined,
+      });
+    } catch (err) { console.error('Failed to save settings:', err); }
     toast.success('Settings saved successfully');
   };
 

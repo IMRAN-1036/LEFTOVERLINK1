@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
+import api from '../api/axios';
 import {
     ArrowLeft, Heart, CreditCard, Smartphone, Landmark,
     ShieldCheck, IndianRupee, CheckCircle2, AlertCircle, Building2, X, Wallet
@@ -53,14 +54,19 @@ export function DonationPage() {
     const [receiverWallet, setReceiverWallet] = useState<ReceiverWallet | null>(null);
 
     useEffect(() => {
+        // Load user from localStorage (auth session only)
         const userStr = localStorage.getItem('user');
-        if (userStr) {
-            setUser(JSON.parse(userStr));
-        }
-        const walletStr = localStorage.getItem('receiverWallet');
-        if (walletStr) {
-            setReceiverWallet(JSON.parse(walletStr));
-        }
+        if (userStr) setUser(JSON.parse(userStr));
+        // Load wallet from MongoDB
+        api.get('/wallet').then(res => {
+            setReceiverWallet({
+                points: res.data.points || 0,
+                balanceINR: res.data.balanceINR || 0,
+                totalOrders: 0,
+                totalPointsEarned: res.data.points || 0,
+                transactions: []
+            } as any);
+        }).catch(() => { });
     }, []);
 
     const quickAmounts = ['100', '250', '500', '1000', '2000', '5000'];
@@ -125,26 +131,14 @@ export function DonationPage() {
         // Deduct from wallet if used
         if (paymentMethod === 'wallet' && receiverWallet) {
             const pointsToDeduct = Number(finalAmount) * 50;
-            const newTransaction: WalletTransaction = {
-                id: `tr-${Date.now()}`,
-                userId: user.id,
-                type: 'donation',
-                amount: pointsToDeduct,
-                amountINR: Number(finalAmount),
-                description: `Donation: ${message || 'Support Cause'}`,
-                status: 'completed',
-                timestamp: new Date()
-            };
-
-            const updatedWallet: ReceiverWallet = {
-                ...receiverWallet,
-                points: receiverWallet.points - pointsToDeduct,
-                balanceINR: (receiverWallet.points - pointsToDeduct) / 50,
-                transactions: [newTransaction, ...receiverWallet.transactions]
-            };
-
-            localStorage.setItem('receiverWallet', JSON.stringify(updatedWallet));
-            setReceiverWallet(updatedWallet);
+            try {
+                await api.post('/wallet/award', { points: -pointsToDeduct });
+                setReceiverWallet(prev => prev ? {
+                    ...prev,
+                    points: prev.points - pointsToDeduct,
+                    balanceINR: parseFloat(((prev.points - pointsToDeduct) / 50).toFixed(2))
+                } : prev);
+            } catch (err) { console.error('Failed to deduct wallet points:', err); }
         }
 
         setPaymentStatus('success');

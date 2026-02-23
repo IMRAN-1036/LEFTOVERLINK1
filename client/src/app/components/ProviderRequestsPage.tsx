@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import api from '../api/axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Header } from './Header';
 import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, Info, Users, ClipboardList, CheckCircle2, XCircle, Navigation, MessageCircle } from 'lucide-react';
@@ -42,103 +43,54 @@ export function ProviderRequestsPage() {
     useEffect(() => {
         if (!user || user.role !== 'provider') return;
 
-        // Load orders purely from localStorage to match existing application logic
-        const loadOrders = () => {
+        const loadOrders = async () => {
             try {
-                const history = localStorage.getItem('pickupHistory');
-                if (history) {
-                    const allHistory = JSON.parse(history);
-                    const myProvidedOrders = allHistory.filter((order: any) => {
-                        const pid = String(order.providerId);
-                        const uid = String(user.id || (user as any)._id);
-                        const matchesProvider = pid === uid || order.providerName === user.name;
-                        return matchesProvider && (order.requestStatus === 'pending' || order.requestStatus === 'accepted');
-                    });
-                    setOrders(myProvidedOrders);
-                }
+                const res = await api.get('/orders/provider');
+                // Show pending and accepted orders for action
+                const active = (res.data as any[]).filter((o: any) =>
+                    o.requestStatus === 'pending' || o.requestStatus === 'accepted'
+                );
+                setOrders(active);
             } catch (err) {
-                console.error("Failed to parse orders", err);
+                console.error("Failed to load orders", err);
             } finally {
                 setIsLoading(false);
             }
         };
-
-        // Small delay to simulate loading for premium feel
-        const timeoutId = setTimeout(() => {
-            loadOrders();
-            // Ping alert for new order feature
-            const hasNew = Math.random() > 0.5; // Simulate if there is a new order
-            if (hasNew) {
-                toast.success('New food claim request received!', {
-                    description: 'Someone just requested your food donation.',
-                    position: 'top-right',
-                    duration: 5000,
-                    icon: '🔔'
-                });
-            }
-        }, 600);
-        return () => clearTimeout(timeoutId);
+        loadOrders();
     }, [user]);
 
-    const handleUpdateDeliveryTime = (orderId: string) => {
+    const handleUpdateDeliveryTime = async (orderId: string) => {
         if (!deliveryTimeInput.trim()) return;
 
         try {
-            const historyStr = localStorage.getItem('pickupHistory');
-            if (historyStr) {
-                const history = JSON.parse(historyStr);
-                const updatedHistory = history.map((item: any) => {
-                    if (item.id === orderId) {
-                        return { ...item, estimatedDeliveryTime: deliveryTimeInput };
-                    }
-                    return item;
-                });
-                localStorage.setItem('pickupHistory', JSON.stringify(updatedHistory));
+            await api.put(`/orders/${orderId}/status`, { estimatedDeliveryTime: deliveryTimeInput });
 
-                // Update local state instantly
-                setOrders(prev => prev.map(o => o.id === orderId ? { ...o, estimatedDeliveryTime: deliveryTimeInput } : o));
-                if (selectedOrder && selectedOrder.id === orderId) {
-                    setSelectedOrder({ ...selectedOrder, estimatedDeliveryTime: deliveryTimeInput });
-                }
-
-                toast.success('Delivery/Pickup time updated successfully', { position: 'top-right' });
-                setDeliveryTimeInput('');
+            // Update local state instantly
+            setOrders(prev => prev.map(o => o.id === orderId ? { ...o, estimatedDeliveryTime: deliveryTimeInput } : o));
+            if (selectedOrder && selectedOrder.id === orderId) {
+                setSelectedOrder({ ...selectedOrder, estimatedDeliveryTime: deliveryTimeInput });
             }
+
+            toast.success('Delivery/Pickup time updated successfully', { position: 'top-right' });
+            setDeliveryTimeInput('');
         } catch (err) {
             console.error('Failed to update delivery time', err);
         }
     };
 
-    const handleStatusAction = (orderId: string, action: 'accepted' | 'declined') => {
+    const handleStatusAction = async (orderId: string, action: 'accepted' | 'declined') => {
         try {
-            const historyStr = localStorage.getItem('pickupHistory');
-            if (historyStr) {
-                const history = JSON.parse(historyStr);
-                let updatedHistory;
+            await api.put(`/orders/${orderId}/status`, { requestStatus: action });
 
-                if (action === 'declined') {
-                    // Remove entirely
-                    updatedHistory = history.filter((item: any) => item.id !== orderId);
-                    setOrders(prev => prev.filter(o => o.id !== orderId));
-                } else {
-                    // Mark as accepted
-                    updatedHistory = history.map((item: any) => {
-                        if (item.id === orderId) {
-                            return { ...item, requestStatus: action };
-                        }
-                        return item;
-                    });
-                    // DO NOT remove accepted orders from view
-                    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, requestStatus: action } : o));
-                }
-
-                localStorage.setItem('pickupHistory', JSON.stringify(updatedHistory));
-                if (selectedOrder?.id === orderId) setSelectedOrder(null);
-
-                toast.success(`Request ${action} successfully`, {
-                    icon: action === 'accepted' ? '✅' : '❌'
-                });
+            if (action === 'declined') {
+                setOrders(prev => prev.filter(o => o.id !== orderId));
+            } else {
+                setOrders(prev => prev.map(o => o.id === orderId ? { ...o, requestStatus: action } : o));
             }
+
+            if (selectedOrder?.id === orderId) setSelectedOrder(null);
+            toast.success(`Request ${action} successfully`, { icon: action === 'accepted' ? '✅' : '❌' });
         } catch (err) {
             console.error('Failed to update request status', err);
         }

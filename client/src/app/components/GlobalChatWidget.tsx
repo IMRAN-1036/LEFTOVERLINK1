@@ -7,47 +7,9 @@ import { format, formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import { useLocation } from 'react-router';
 import { chatSyncService, ChatMessage } from '../../shared/chatSync';
+import api from '../api/axios';
 
 
-
-// Helper to extract unique counter-parties from pickupHistory
-function getUniqueContactsCount(userRole: string | undefined, userId: string | undefined): { id: string, name: string, lastActive: Date, orderId: string }[] {
-    try {
-        const historyStr = localStorage.getItem('pickupHistory');
-        if (!historyStr || !userRole || !userId) return [];
-        const history = JSON.parse(historyStr);
-
-        const contactMap = new Map();
-
-        history.forEach((order: any) => {
-            // For Receivers: contact is Provider
-            // For Providers: contact is Receiver
-            const isRelatedToMe = userRole === 'receiver'
-                ? (order.receiverId === userId || String(order.receiverId) === String(userId))
-                : (order.providerId === userId || String(order.providerId) === String(userId));
-
-            if (!isRelatedToMe) return;
-
-            const contactName = userRole === 'receiver' ? order.providerName : order.receiverName;
-            const contactId = userRole === 'receiver' ? order.providerId : order.receiverId;
-
-            if (contactName && order.id) {
-                if (!contactMap.has(contactName)) {
-                    contactMap.set(contactName, {
-                        id: contactId || `contact-${Date.now()}`,
-                        name: contactName,
-                        lastActive: order.pickupTime ? new Date(order.pickupTime) : new Date(),
-                        orderId: order.id
-                    });
-                }
-            }
-        });
-
-        return Array.from(contactMap.values()).sort((a, b) => b.lastActive.getTime() - a.lastActive.getTime());
-    } catch {
-        return [];
-    }
-}
 
 export function GlobalChatWidget() {
     const { user } = useAuth();
@@ -104,26 +66,48 @@ export function GlobalChatWidget() {
 
     useEffect(() => {
         if (!user) return;
-        const userId = user?.id || (user as any)?._id;
 
-        const updateContactsAndPoll = () => {
-            const contacts = getUniqueContactsCount(user?.role, userId);
-            setProviders(contacts);
+        const updateContactsAndPoll = async () => {
+            try {
+                const endpoint = user.role === 'receiver' ? '/orders/mine' : '/orders/provider';
+                const res = await api.get(endpoint);
+                const orders: any[] = res.data;
 
-            const orderIds = contacts.map(c => c.orderId);
-            if (orderIds.length > 0) {
-                chatSyncService.startGlobalPolling(orderIds);
-            } else {
-                chatSyncService.stopGlobalPolling();
+                const contactMap = new Map();
+                orders.forEach((order: any) => {
+                    const contactName = user.role === 'receiver' ? order.providerName : order.receiverName;
+                    const contactId = user.role === 'receiver' ? order.providerId : order.receiverId;
+                    if (contactName && order.id && !contactMap.has(contactName)) {
+                        contactMap.set(contactName, {
+                            id: contactId || order.id,
+                            name: contactName,
+                            lastActive: order.pickupTime ? new Date(order.pickupTime) : new Date(order.createdAt || Date.now()),
+                            orderId: order.id
+                        });
+                    }
+                });
+
+                const contacts = Array.from(contactMap.values())
+                    .sort((a, b) => b.lastActive.getTime() - a.lastActive.getTime());
+                setProviders(contacts);
+
+                const orderIds = contacts.map(c => c.orderId);
+                if (orderIds.length > 0) {
+                    chatSyncService.startGlobalPolling(orderIds);
+                } else {
+                    chatSyncService.stopGlobalPolling();
+                }
+            } catch (err) {
+                console.error('Failed to load contacts:', err);
             }
         };
 
         updateContactsAndPoll();
-        window.addEventListener('storage', updateContactsAndPoll);
+        const interval = setInterval(updateContactsAndPoll, 30000);
 
         return () => {
             chatSyncService.stopGlobalPolling();
-            window.removeEventListener('storage', updateContactsAndPoll);
+            clearInterval(interval);
         };
     }, [user]);
 

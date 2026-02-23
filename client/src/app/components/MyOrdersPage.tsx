@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import api from '../api/axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Header } from './Header';
 import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, MessageCircle, Info } from 'lucide-react';
@@ -18,23 +19,17 @@ export function MyOrdersPage() {
     const [activeChatOrder, setActiveChatOrder] = useState<{ id: string, providerName: string } | null>(null);
 
     useEffect(() => {
-        // Load orders purely from localStorage to match existing application logic
-        const loadOrders = () => {
+        const loadOrders = async () => {
             try {
-                const history = localStorage.getItem('pickupHistory');
-                if (history) {
-                    setOrders(JSON.parse(history));
-                }
+                const res = await api.get('/orders/mine');
+                setOrders(res.data);
             } catch (err) {
-                console.error("Failed to parse orders", err);
+                console.error("Failed to load orders", err);
             } finally {
                 setIsLoading(false);
             }
         };
-
-        // Small delay to simulate loading for premium feel
-        const timeoutId = setTimeout(loadOrders, 600);
-        return () => clearTimeout(timeoutId);
+        loadOrders();
     }, []);
 
     const handleOpenChat = (orderId: string, providerName: string) => {
