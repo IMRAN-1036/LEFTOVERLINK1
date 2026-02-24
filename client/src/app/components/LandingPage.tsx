@@ -5,10 +5,28 @@ import { UtensilsCrossed, Heart, Users, TrendingDown } from 'lucide-react';
 import { Header } from './Header';
 import { LiveHeatmap } from '../features/map/LiveHeatmap';
 import { useAuth } from '../context/AuthContext';
+import { useState, useEffect } from 'react';
+import api from '../api/axios';
 
 export function LandingPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [stats, setStats] = useState({ totalUsers: 1000, totalMeals: 5000, totalOrders: 500 });
+
+  useEffect(() => {
+    api.get('/analytics/stats').then(res => {
+      if (res.data?.success) {
+        const d = res.data.data;
+        setStats({
+          totalUsers: Math.max(d.totalUsers, 1000),
+          totalMeals: Math.max(d.totalMeals, 5000),
+          totalOrders: Math.max(d.totalOrders, 500),
+        });
+      }
+    }).catch(() => { }); // Silently use defaults
+  }, []);
+
+  const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k+` : `${n}+`;
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
@@ -57,7 +75,7 @@ export function LandingPage() {
               className="bg-card p-6 rounded-2xl shadow-sm border"
             >
               <Users className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-              <div className="text-3xl font-bold mb-1">1000+</div>
+              <div className="text-3xl font-bold mb-1">{fmt(stats.totalUsers)}</div>
               <p className="text-muted-foreground">People helped</p>
             </motion.div>
 
@@ -68,7 +86,7 @@ export function LandingPage() {
               className="bg-card p-6 rounded-2xl shadow-sm border"
             >
               <Heart className="w-8 h-8 text-green-500 mx-auto mb-2" />
-              <div className="text-3xl font-bold mb-1">5000+</div>
+              <div className="text-3xl font-bold mb-1">{fmt(stats.totalMeals)}</div>
               <p className="text-muted-foreground">Meals saved</p>
             </motion.div>
           </div>
@@ -243,8 +261,8 @@ export function LandingPage() {
             <div className="flex gap-4">
               <div className="text-green-600 text-2xl">✓</div>
               <div>
-                <h4 className="mb-1 font-semibold">No Money Involved</h4>
-                <p className="text-sm text-muted-foreground">100% free coordination platform</p>
+                <h4 className="mb-1 font-semibold">Minimal Coordination Fee</h4>
+                <p className="text-sm text-muted-foreground">Food is always free — only a small ₹1–₹10 logistics fee applies per pickup</p>
               </div>
             </div>
 

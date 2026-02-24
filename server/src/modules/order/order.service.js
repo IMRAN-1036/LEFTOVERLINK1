@@ -79,10 +79,20 @@ const formatOrder = (order) => ({
   createdAt: order.createdAt,
 });
 
+const findOrderById = async (id) => {
+  return Order.findById(id);
+};
+
+const deleteOrder = async (id) => {
+  return Order.findByIdAndDelete(id);
+};
+
 module.exports = {
   createOrder,
   getOrdersByReceiver,
   getOrdersByProvider,
   updateOrderStatus,
   updateOrderPayment,
+  findOrderById,
+  deleteOrder,
 };

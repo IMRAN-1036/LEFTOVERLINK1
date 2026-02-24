@@ -1,382 +1,219 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from './ui/button';
-import { Card } from './ui/card';
 import { Badge } from './ui/badge';
-import { ArrowLeft, Calendar, MapPin, Star, Leaf, Award, TrendingUp, Droplet, TreePine, Flame } from 'lucide-react';
-import { motion } from 'motion/react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-
-interface HistoryItem {
-  id: string;
-  foodType: string;
-  isVeg: boolean;
-  quantity: number;
-  providerName: string;
-  pickupDate: Date;
-  location: string;
-  rating?: number;
-  impact: number; // meals saved
-}
-
-interface Achievement {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  earned: boolean;
-  progress?: number;
-  total?: number;
-}
+import { ArrowLeft, ShoppingBag, Clock, MapPin, Leaf, Award, TrendingUp, Flame, Loader2, MessageCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { formatDistanceToNow } from 'date-fns';
+import api from '../api/axios';
+import { Header } from './Header';
+import { ChatDialog } from './ChatDialog';
+import { useAuth } from '../context/AuthContext';
 
 export function PickupHistoryPage() {
   const navigate = useNavigate();
-  const [history] = useState<HistoryItem[]>([
-    {
-      id: 'history-1',
-      foodType: 'Mixed Rice & Curry',
-      isVeg: true,
-      quantity: 15,
-      providerName: 'Green Leaf Restaurant',
-      pickupDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-      location: '123 Main St, New York',
-      rating: 5,
-      impact: 15
-    },
-    {
-      id: 'history-2',
-      foodType: 'vada and chutney',
-      isVeg: false,
-      quantity: 20,
-      providerName: 'Nellore Mess',
-      pickupDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-      location: 'Vedayapalem, Nellore',
-      rating: 5,
-      impact: 20
-    },
-    {
-      id: 'history-3',
-      foodType: 'Wedding Buffet',
-      isVeg: true,
-      quantity: 50,
-      providerName: 'Wedding Event - sharmas Family',
-      pickupDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-      location: 'minerva grand - dargamitta, nellore',
-      rating: 5,
-      impact: 50
-    },
-    {
-      id: 'history-4',
-      foodType: 'Curd Rice',
-      isVeg: true,
-      quantity: 12,
-      providerName: 'Sri Rama Catering',
-      pickupDate: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
-      location: 'Santhapet, Ongole',
-      rating: 4,
-      impact: 12
-    },
-    {
-      id: 'history-5',
-      foodType: 'Mixed Rice & Curry',
-      isVeg: true,
-      quantity: 8,
-      providerName: 'Green Leaf Restaurant',
-      pickupDate: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
-      location: 'white field,bangalore',
-      rating: 5,
-      impact: 8
-    }
-  ]);
+  const { user } = useAuth();
+  const [orders, setOrders] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [activeChatOrder, setActiveChatOrder] = useState<{ id: string; name: string } | null>(null);
 
-  const [achievements] = useState<Achievement[]>([
-    {
-      id: '1',
-      name: 'First Rescue',
-      description: 'Saved your first meal from waste',
-      icon: '🎯',
-      earned: true
-    },
-    {
-      id: '2',
-      name: 'Eco Warrior',
-      description: 'Saved 50 meals from waste',
-      icon: '🌍',
-      earned: true
-    },
-    {
-      id: '3',
-      name: 'Century Club',
-      description: 'Saved 100 meals',
-      icon: '💯',
-      earned: false,
-      progress: 97,
-      total: 100
-    },
-    {
-      id: '4',
-      name: 'Streak Master',
-      description: '7-day pickup streak',
-      icon: '🔥',
-      earned: true
-    },
-    {
-      id: '5',
-      name: 'Community Hero',
-      description: 'Top contributor this month',
-      icon: '⭐',
-      earned: false,
-      progress: 3,
-      total: 1
-    }
-  ]);
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        const endpoint = user?.role === 'provider' ? '/orders/provider' : '/orders/mine';
+        const res = await api.get(endpoint);
+        // History = completed (payment done) orders
+        const completed = (res.data as any[]).filter((o: any) => o.paymentStatus === 'completed' || o.requestStatus === 'accepted');
+        setOrders(completed);
+      } catch (err) {
+        console.error('Failed to load history', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadHistory();
+  }, [user]);
 
-  const totalMealsSaved = history.reduce((sum, item) => sum + item.impact, 0);
-  const totalPickups = history.length;
-  const averageRating = (history.reduce((sum, item) => sum + (item.rating || 0), 0) / history.length).toFixed(1);
-  const co2Saved = (totalMealsSaved * 2.5).toFixed(1); // kg
-  const waterSaved = (totalMealsSaved * 150).toFixed(0); // liters
-  const userLevel = Math.floor(totalMealsSaved / 20) + 1;
-  const userPoints = totalMealsSaved * 10;
+  // Aggregate impact stats
+  const totalMeals = orders.reduce((sum, o) => sum + (o.numberOfMeals || 1), 0);
+  const totalCO2 = (totalMeals * 2.5).toFixed(1); // ~2.5kg CO2 per meal
+  const totalWater = (totalMeals * 500); // ~500L water per meal saved
 
-  const formatDate = (date: Date) => {
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - date.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays} days ago`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-    return date.toLocaleDateString();
-  };
+  const achievements = [
+    { icon: '🌱', name: 'First Save', description: 'Completed your first pickup', earned: orders.length >= 1 },
+    { icon: '🌟', name: 'Super Hero', description: 'Saved 10+ meals', earned: totalMeals >= 10 },
+    { icon: '🔥', name: 'On Fire', description: 'Saved 50+ meals', earned: totalMeals >= 50 },
+    { icon: '🏆', name: 'Legend', description: 'Saved 100+ meals', earned: totalMeals >= 100 },
+  ];
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="bg-green-600 text-white px-4 py-4 shadow-md sticky top-0 z-10">
-        <div className="container mx-auto max-w-4xl flex items-center gap-3">
+    <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 flex flex-col font-sans">
+      <Header />
+      <main className="flex-1 container mx-auto px-4 py-8 md:py-12 mt-20 max-w-5xl">
+        <div className="flex items-center gap-4 mb-8">
           <Button
-            size="sm"
             variant="ghost"
-            className="text-white hover:bg-green-700"
-            onClick={() => navigate('/dashboard')}
+            size="icon"
+            onClick={() => navigate(user?.role === 'provider' ? '/provider' : '/receiver')}
+            className="rounded-full hover:bg-slate-200 dark:hover:bg-zinc-800"
           >
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <h1 className="text-xl">Your Impact Dashboard</h1>
-        </div>
-      </div>
-
-      <div className="container mx-auto max-w-4xl px-4 py-6 space-y-6 pb-20">
-        {/* Level & Points Card */}
-        <Card className="p-6 bg-gradient-to-br from-purple-500 to-pink-500 text-white">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm opacity-90">Food Saver Level</div>
-              <div className="text-4xl font-bold mt-1">Level {userLevel}</div>
-              <div className="text-sm opacity-90 mt-2">{userPoints} Points</div>
-            </div>
-            <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center">
-              <Award className="w-10 h-10" />
-            </div>
+          <div>
+            <h1 className="text-3xl md:text-4xl font-black tracking-tight flex items-center gap-3">
+              <ShoppingBag className="w-8 h-8 text-green-600" />
+              My History
+            </h1>
+            <p className="text-muted-foreground mt-1">Your completed food rescues and impact.</p>
           </div>
-          <div className="mt-4 bg-white/20 rounded-full h-2">
-            <div
-              className="bg-white h-2 rounded-full transition-all"
-              style={{ width: `${((totalMealsSaved % 20) / 20) * 100}%` }}
-            />
-          </div>
-          <div className="text-xs opacity-90 mt-1">
-            {20 - (totalMealsSaved % 20)} meals until Level {userLevel + 1}
-          </div>
-        </Card>
-
-        {/* Impact Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <motion.div
-            whileHover={{ scale: 1.05 }}
-            className="bg-gradient-to-br from-green-500 to-green-600 p-4 rounded-lg text-white"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Leaf className="w-5 h-5" />
-              <div className="text-xs opacity-90">Meals Saved</div>
-            </div>
-            <div className="text-3xl font-bold">{totalMealsSaved}</div>
-          </motion.div>
-
-          <motion.div
-            whileHover={{ scale: 1.05 }}
-            className="bg-gradient-to-br from-blue-500 to-blue-600 p-4 rounded-lg text-white"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Flame className="w-5 h-5" />
-              <div className="text-xs opacity-90">CO₂ Saved</div>
-            </div>
-            <div className="text-3xl font-bold">{co2Saved}</div>
-            <div className="text-xs opacity-90">kg</div>
-          </motion.div>
-
-          <motion.div
-            whileHover={{ scale: 1.05 }}
-            className="bg-gradient-to-br from-cyan-500 to-cyan-600 p-4 rounded-lg text-white"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Droplet className="w-5 h-5" />
-              <div className="text-xs opacity-90">Water Saved</div>
-            </div>
-            <div className="text-3xl font-bold">{waterSaved}</div>
-            <div className="text-xs opacity-90">liters</div>
-          </motion.div>
-
-          <motion.div
-            whileHover={{ scale: 1.05 }}
-            className="bg-gradient-to-br from-yellow-500 to-orange-500 p-4 rounded-lg text-white"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Star className="w-5 h-5" />
-              <div className="text-xs opacity-90">Avg Rating</div>
-            </div>
-            <div className="text-3xl font-bold">{averageRating}</div>
-            <div className="text-xs opacity-90">/ 5.0</div>
-          </motion.div>
         </div>
 
-        {/* Environmental Impact Comparison */}
-        <Card className="p-6 bg-green-500/10 border-green-500/20">
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-green-600" />
-            Your Environmental Impact
-          </h3>
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <TreePine className="w-8 h-8 text-green-600" />
-              <div>
-                <div className="text-sm font-medium">Equivalent to planting</div>
-                <div className="text-2xl font-bold text-green-600">
-                  {Math.floor(parseFloat(co2Saved) / 1.5)} trees
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Droplet className="w-8 h-8 text-blue-600" />
-              <div>
-                <div className="text-sm font-medium">That's enough water for</div>
-                <div className="text-2xl font-bold text-blue-600">
-                  {Math.floor(parseInt(waterSaved) / 50)} people per day
-                </div>
-              </div>
-            </div>
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center min-h-[400px]">
+            <Loader2 className="w-10 h-10 text-green-600 animate-spin mb-4" />
+            <p className="text-muted-foreground animate-pulse">Loading your history...</p>
           </div>
-        </Card>
+        ) : (
+          <Tabs defaultValue="history">
+            <TabsList className="mb-6 bg-white dark:bg-zinc-900 border rounded-2xl p-1 shadow-sm">
+              <TabsTrigger value="history" className="rounded-xl flex items-center gap-2 data-[state=active]:bg-green-600 data-[state=active]:text-white">
+                <ShoppingBag className="w-4 h-4" /> Orders ({orders.length})
+              </TabsTrigger>
+              <TabsTrigger value="impact" className="rounded-xl flex items-center gap-2 data-[state=active]:bg-green-600 data-[state=active]:text-white">
+                <TrendingUp className="w-4 h-4" /> Impact
+              </TabsTrigger>
+              <TabsTrigger value="achievements" className="rounded-xl flex items-center gap-2 data-[state=active]:bg-green-600 data-[state=active]:text-white">
+                <Award className="w-4 h-4" /> Badges
+              </TabsTrigger>
+            </TabsList>
 
-        {/* Tabs for History and Achievements */}
-        <Tabs defaultValue="history" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="history">Pickup History</TabsTrigger>
-            <TabsTrigger value="achievements">Achievements</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="history" className="space-y-3 mt-4">
-            {history.length === 0 ? (
-              <Card className="p-8 text-center bg-card border">
-                <div className="text-muted-foreground">No pickup history yet</div>
-              </Card>
-            ) : (
-              history.map((item, index) => (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                >
-                  <Card className="p-4 hover:shadow-lg transition-shadow">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-bold">{item.foodType}</h3>
-                          {item.isVeg && (
-                            <Badge variant="outline" className="bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 text-xs">
-                              <Leaf className="w-3 h-3 mr-1" />
-                              Veg
+            {/* Orders Tab */}
+            <TabsContent value="history">
+              {orders.length === 0 ? (
+                <div className="flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-border/50 shadow-sm min-h-[400px]">
+                  <div className="w-24 h-24 mb-6 rounded-full bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
+                    <ShoppingBag className="w-12 h-12 text-green-600 opacity-50" />
+                  </div>
+                  <h2 className="text-2xl font-bold mb-2">No history yet</h2>
+                  <p className="text-muted-foreground max-w-md mb-8">Complete your first food pickup to see it here.</p>
+                  <Button
+                    className="bg-green-600 hover:bg-green-700 text-white rounded-full px-8 h-12 font-bold shadow-lg shadow-green-600/20 hover:scale-105 transition-all"
+                    onClick={() => navigate('/receiver')}
+                  >
+                    Find Food Near You
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  <AnimatePresence>
+                    {orders.map((order, idx) => (
+                      <motion.div
+                        key={order.id || idx}
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.06 }}
+                        className="bg-white dark:bg-zinc-900 rounded-2xl p-5 border border-border/50 shadow-sm hover:shadow-md transition-shadow flex flex-col md:flex-row gap-4"
+                      >
+                        <div className="flex-1 space-y-3">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <h3 className="font-bold text-lg">{order.foodType || 'Food Donation'}</h3>
+                            <Badge variant="outline" className="border-green-500 text-green-600 bg-green-50 dark:bg-green-500/10">
+                              {order.paymentStatus === 'completed' ? '✓ Paid' : 'Accepted'}
                             </Badge>
-                          )}
-                        </div>
-                        <p className="text-sm text-muted-foreground">{item.providerName}</p>
-                      </div>
-                      {item.rating && (
-                        <div className="flex items-center gap-1 bg-yellow-500/10 px-2 py-1 rounded border border-yellow-500/20">
-                          <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                          <span className="text-sm font-bold">{item.rating}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground mb-2">
-                      <div className="flex items-center gap-1">
-                        <Calendar className="w-4 h-4" />
-                        <span>{formatDate(item.pickupDate)}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Leaf className="w-4 h-4 text-green-600" />
-                        <span className="text-green-600 font-bold">
-                          {item.impact} meals saved
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground/60">
-                      <MapPin className="w-3 h-3" />
-                      <span>{item.location}</span>
-                    </div>
-                  </Card>
-                </motion.div>
-              ))
-            )}
-          </TabsContent>
-
-          <TabsContent value="achievements" className="space-y-3 mt-4">
-            <div className="grid gap-3">
-              {achievements.map((achievement, index) => (
-                <motion.div
-                  key={achievement.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                >
-                  <Card className={`p-4 border ${achievement.earned ? 'bg-gradient-to-br from-yellow-500/10 to-orange-500/10 border-yellow-500/20' : 'opacity-60 grayscale'}`}>
-                    <div className="flex items-center gap-4">
-                      <div className="text-4xl">{achievement.icon}</div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-bold">{achievement.name}</h3>
-                          {achievement.earned && (
-                            <Badge className="bg-yellow-500 text-white border-0">Earned</Badge>
-                          )}
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-1">{achievement.description}</p>
-                        {!achievement.earned && achievement.progress !== undefined && (
-                          <div className="mt-2">
-                            <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                              <span>Progress</span>
-                              <span>{achievement.progress}/{achievement.total}</span>
-                            </div>
-                            <div className="bg-muted rounded-full h-2">
-                              <div
-                                className="bg-green-600 h-2 rounded-full transition-all"
-                                style={{ width: `${(achievement.progress! / achievement.total!) * 100}%` }}
-                              />
-                            </div>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
-          </TabsContent>
-        </Tabs>
-      </div>
+                          <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                            <span className="flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-green-600" />
+                              {user?.role === 'provider' ? `Receiver: ${order.receiverName || 'Someone'}` : `Provider: ${order.providerName || 'Anonymous'}`}
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                              <ShoppingBag className="w-3.5 h-3.5" /> {order.numberOfMeals || 1} meals
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5" />
+                              {order.createdAt ? formatDistanceToNow(new Date(order.createdAt), { addSuffix: true }) : 'Recently'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex md:flex-col gap-2 md:min-w-[140px] justify-end md:justify-center">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-xl gap-1.5 font-semibold"
+                            onClick={() => {
+                              setActiveChatOrder({ id: order.id, name: user?.role === 'provider' ? order.receiverName : order.providerName });
+                              setIsChatOpen(true);
+                            }}
+                          >
+                            <MessageCircle className="w-4 h-4" /> Chat
+                          </Button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Impact Tab */}
+            <TabsContent value="impact">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                {[
+                  { icon: <ShoppingBag className="w-8 h-8 text-green-600" />, value: totalMeals, label: 'Meals Rescued', unit: '', bg: 'bg-green-50 dark:bg-green-900/20' },
+                  { icon: <Leaf className="w-8 h-8 text-emerald-600" />, value: totalCO2, label: 'CO₂ Prevented', unit: 'kg', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+                  { icon: <Flame className="w-8 h-8 text-blue-600" />, value: `${(totalWater / 1000).toFixed(1)}k`, label: 'Litres of Water Saved', unit: 'L', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+                ].map((stat, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: i * 0.1 }}
+                    className={`${stat.bg} rounded-3xl p-8 text-center border border-border/30`}
+                  >
+                    <div className="flex justify-center mb-4">{stat.icon}</div>
+                    <div className="text-4xl font-black mb-1">{stat.value}{stat.unit}</div>
+                    <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
+                  </motion.div>
+                ))}
+              </div>
+            </TabsContent>
+
+            {/* Achievements Tab */}
+            <TabsContent value="achievements">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {achievements.map((a, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.08 }}
+                    className={`rounded-2xl p-6 text-center border transition-all ${a.earned
+                      ? 'bg-white dark:bg-zinc-900 border-green-200 dark:border-green-800 shadow-md shadow-green-100/50 dark:shadow-green-900/20'
+                      : 'bg-muted/30 border-muted opacity-50 grayscale'
+                      }`}
+                  >
+                    <div className="text-4xl mb-3">{a.icon}</div>
+                    <h3 className="font-bold mb-1 text-sm">{a.name}</h3>
+                    <p className="text-[11px] text-muted-foreground">{a.description}</p>
+                    {a.earned && <Badge className="mt-3 bg-green-600 text-white text-[10px]">Earned ✓</Badge>}
+                  </motion.div>
+                ))}
+              </div>
+            </TabsContent>
+          </Tabs>
+        )}
+      </main>
+
+      {activeChatOrder && (
+        <ChatDialog
+          isOpen={isChatOpen}
+          onClose={() => setIsChatOpen(false)}
+          orderId={activeChatOrder.id}
+          providerName={activeChatOrder.name}
+        />
+      )}
     </div>
   );
 }

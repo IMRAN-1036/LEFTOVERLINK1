@@ -6,6 +6,7 @@ const {
   getProviderOrdersHandler,
   updateStatusHandler,
   updatePaymentHandler,
+  deleteOrderHandler,
 } = require("./order.controller");
 
 const router = express.Router();
@@ -24,5 +25,8 @@ router.put("/:id/status", authenticate, requireRole("provider"), updateStatusHan
 
 // Receiver: mark payment completed
 router.put("/:id/payment", authenticate, requireRole("receiver"), updatePaymentHandler);
+
+// Provider: remove an order from their history
+router.delete("/:id", authenticate, requireRole("provider"), deleteOrderHandler);
 
 module.exports = router;

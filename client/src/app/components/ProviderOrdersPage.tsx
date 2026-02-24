@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Header } from './Header';
-import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, MessageCircle, Info, Users } from 'lucide-react';
+import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, MessageCircle, Info, Users, Trash2, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { formatDistanceToNow } from 'date-fns';
 import { ChatDialog } from './ChatDialog';
 import { useAuth } from '../context/AuthContext';
+import { toast } from 'sonner';
 import {
     Dialog,
     DialogContent,
@@ -23,6 +24,7 @@ export function ProviderOrdersPage() {
     const { user } = useAuth();
     const [orders, setOrders] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState('');
 
     // Chat States
     const [isChatOpen, setIsChatOpen] = useState(false);
@@ -30,6 +32,7 @@ export function ProviderOrdersPage() {
 
     // Order Details State
     const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+    const [removeOrderId, setRemoveOrderId] = useState<string | null>(null);
 
     useEffect(() => {
         if (!user || user.role !== 'provider') return;
@@ -41,7 +44,8 @@ export function ProviderOrdersPage() {
                 const accepted = (res.data as any[]).filter((o: any) => o.requestStatus === 'accepted');
                 setOrders(accepted);
             } catch (err) {
-                console.error("Failed to load orders", err);
+                setError('Could not load orders. Please check your connection.');
+                console.error('Failed to load orders', err);
             } finally {
                 setIsLoading(false);
             }
@@ -52,6 +56,18 @@ export function ProviderOrdersPage() {
     const handleOpenChat = (orderId: string, receiverName: string) => {
         setActiveChatOrder({ id: orderId, counterpartyName: receiverName });
         setIsChatOpen(true);
+    };
+
+    const handleRemove = async (orderId: string) => {
+        try {
+            await api.delete(`/orders/${orderId}`);
+            setOrders(prev => prev.filter(o => o.id !== orderId));
+            toast.success('Order removed');
+        } catch {
+            toast.error('Failed to remove order');
+        } finally {
+            setRemoveOrderId(null);
+        }
     };
 
     return (
@@ -81,6 +97,13 @@ export function ProviderOrdersPage() {
                     <div className="flex-1 flex flex-col items-center justify-center min-h-[400px]">
                         <Loader2 className="w-10 h-10 text-green-600 animate-spin mb-4" />
                         <p className="text-lg font-medium text-muted-foreground animate-pulse">Loading your history...</p>
+                    </div>
+                ) : error ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-red-200 shadow-sm min-h-[400px]">
+                        <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
+                        <h2 className="text-xl font-bold mb-2">Could not load orders</h2>
+                        <p className="text-muted-foreground max-w-sm mb-6">{error}</p>
+                        <Button variant="outline" onClick={() => window.location.reload()}>Try Again</Button>
                     </div>
                 ) : orders.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-border/50 shadow-sm min-h-[400px]">
@@ -166,6 +189,15 @@ export function ProviderOrdersPage() {
                                                 <Info className="w-4 h-4" />
                                                 Order Details
                                             </Button>
+
+                                            <Button
+                                                variant="outline"
+                                                className="flex-1 w-full rounded-xl font-bold h-12 gap-2 text-red-600 border-red-200 hover:bg-red-50 dark:hover:bg-red-900/20 dark:border-red-900/50"
+                                                onClick={() => setRemoveOrderId(order.id)}
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                                Remove
+                                            </Button>
                                         </div>
                                     </div>
                                 </motion.div>
@@ -245,6 +277,36 @@ export function ProviderOrdersPage() {
                             </div>
                         </>
                     )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Remove Confirmation Dialog */}
+            <Dialog open={!!removeOrderId} onOpenChange={(open) => !open && setRemoveOrderId(null)}>
+                <DialogContent className="sm:max-w-sm rounded-2xl border-none shadow-2xl">
+                    <DialogHeader className="text-center">
+                        <div className="mx-auto w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-3">
+                            <Trash2 className="w-7 h-7 text-red-600" />
+                        </div>
+                        <DialogTitle className="text-xl font-black">Remove Order?</DialogTitle>
+                        <DialogDescription className="text-muted-foreground text-sm">
+                            This will permanently delete this order from your history. This action cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="flex gap-3 pt-2">
+                        <Button
+                            variant="outline"
+                            className="flex-1 rounded-xl h-11 font-bold"
+                            onClick={() => setRemoveOrderId(null)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            className="flex-1 rounded-xl h-11 font-bold bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20"
+                            onClick={() => removeOrderId && handleRemove(removeOrderId)}
+                        >
+                            Yes, Remove
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>

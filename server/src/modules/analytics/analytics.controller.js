@@ -1,4 +1,7 @@
 const { faker } = require("@faker-js/faker");
+const User = require("../../../models/User");
+const Food = require("../../../models/Food");
+const Order = require("../order/order.model");
 
 // Simulate heatmap data clustered across all major Indian cities AND all of Andhra Pradesh
 const CITIES = [
@@ -70,6 +73,25 @@ const getHeatmapData = (req, res) => {
     }
 };
 
+const getStats = async (req, res) => {
+    try {
+        const [totalUsers, activePosts] = await Promise.all([
+            User.countDocuments(),
+            Food.countDocuments({ status: 'available' }),
+        ]);
+        const mealAgg = await Order.aggregate([
+            { $match: { paymentStatus: 'completed' } },
+            { $group: { _id: null, totalMeals: { $sum: '$numberOfMeals' } } }
+        ]);
+        const totalMeals = mealAgg[0]?.totalMeals || 0;
+        const totalOrders = await Order.countDocuments({ paymentStatus: 'completed' });
+        res.json({ success: true, data: { totalUsers, totalOrders, totalMeals, activePosts } });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Failed to get stats' });
+    }
+};
+
 module.exports = {
-    getHeatmapData
+    getHeatmapData,
+    getStats,
 };

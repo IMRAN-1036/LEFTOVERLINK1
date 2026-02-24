@@ -1,26 +1,31 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Card, CardContent } from './ui/card';
 import { Slider } from './ui/slider';
-import { ArrowLeft, MapPin, Clock, Users, Leaf, ChevronRight, Check } from 'lucide-react';
+import { ArrowLeft, Clock, Users, Leaf, ChevronRight, Check, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLocation } from '../hooks/useLocation';
 import { motion, AnimatePresence } from 'motion/react';
-import { ProviderWallet, WalletTransaction, FoodPost } from '../types';
+import { FoodPost } from '../types';
 import api from '../api/axios';
 import { FoodMap } from '../features/map/FoodMap';
 import { AddressAutocomplete, LocationResult } from './AddressAutocomplete';
+import { useAuth } from '../context/AuthContext';
 
 export function PostFoodPage() {
   const navigate = useNavigate();
   const { detectLocation, isDetecting } = useLocation();
+  const { user } = useAuth();
 
+  // 2 steps now: (1) Food Info, (2) Quantity, Expiry & Location
   const [step, setStep] = useState(1);
-  const [roleMatched, setRoleMatched] = useState(false);
+
+  useEffect(() => {
+    if (user && user.role !== 'provider') navigate('/receiver');
+  }, [user, navigate]);
 
   // Form states
   const [foodCategory, setFoodCategory] = useState<'veg' | 'non-veg' | 'vegan' | 'mixed'>('veg');
@@ -29,20 +34,6 @@ export function PostFoodPage() {
   const [hoursUntilExpiry, setHoursUntilExpiry] = useState([2]);
   const [address, setAddress] = useState('');
   const [detectedLocation, setDetectedLocation] = useState<{ lat: number; lng: number; address: string } | null>(null);
-
-  useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      if (user.role !== 'provider') {
-        navigate('/receiver');
-      } else {
-        setRoleMatched(true);
-      }
-    } else {
-      navigate('/login');
-    }
-  }, [navigate]);
 
   const handleDetectLocation = async () => {
     const location = await detectLocation();
@@ -53,139 +44,95 @@ export function PostFoodPage() {
   };
 
   const getEarnings = (q: number) => {
-    let rate = 0;
-    if (q <= 10) rate = 1;
-    else if (q <= 20) rate = 5;
-    else rate = 10;
+    let rate = q <= 10 ? 1 : q <= 20 ? 5 : 10;
     return q * rate;
   };
 
-  const getRatePerMeal = (q: number) => {
-    if (q <= 10) return 1;
-    if (q <= 20) return 5;
-    return 10;
-  };
+  const getRatePerMeal = (q: number) => q <= 10 ? 1 : q <= 20 ? 5 : 10;
+
+  const canGoToStep2 = description.trim().length >= 2;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!description || description.trim().length < 2) {
+      toast.error('Please describe the food (at least 2 characters)');
+      return;
+    }
     if (!address) {
       toast.error('Please provide a pickup location');
       return;
     }
-
-    const userStr = localStorage.getItem('user');
-    const user = userStr ? JSON.parse(userStr) : null;
-
     if (!user) {
       toast.error('Session expired. Please login again.');
       navigate('/login');
       return;
     }
-
-    // Validate that we have proper location coordinates
-    if (!detectedLocation || detectedLocation.lat === 0 || detectedLocation.lng === 0 || isNaN(detectedLocation.lat) || isNaN(detectedLocation.lng)) {
-      toast.error('Please detect your location or try again');
+    if (!detectedLocation || isNaN(detectedLocation.lat) || isNaN(detectedLocation.lng)) {
+      toast.error('Please search or detect your location');
       return;
     }
 
-    const earnings = getEarnings(quantity[0]);
     const expiryDate = new Date();
     expiryDate.setHours(expiryDate.getHours() + hoursUntilExpiry[0]);
 
-    const newPost: FoodPost = {
-      id: `p-${Date.now()}`,
-      providerId: user.id,
-      providerName: user.name,
-      foodType: description.substring(0, 30) + (description.length > 30 ? '...' : ''),
-      isVeg: foodCategory === 'veg' || foodCategory === 'vegan',
-      dietaryType: foodCategory,
-      quantity: quantity[0],
-      description: description,
-      expiryTime: expiryDate,
-      location: {
-        lat: detectedLocation.lat,
-        lng: detectedLocation.lng,
-        address: address,
-      },
-      status: 'available',
-      postedAt: new Date(),
-      urgency: hoursUntilExpiry[0] < 2 ? 'urgent' : hoursUntilExpiry[0] < 5 ? 'medium' : 'fresh'
-    };
-
     try {
-      // send to backend using axios and proper field names expected by server
-      const payload = {
-        title: newPost.foodType,
-        description: newPost.description,
-        quantity: newPost.quantity,
-        expiry: newPost.expiryTime, // ISO/date is fine
+      await api.post('/food', {
+        title: description.trim().substring(0, 60) || 'Food Donation',
+        description: description.trim(),
+        quantity: quantity[0],
+        expiry: expiryDate,
         location: {
-          lat: newPost.location.lat,
-          lng: newPost.location.lng,
-          address: newPost.location.address,
+          lat: detectedLocation.lat,
+          lng: detectedLocation.lng,
+          address,
         },
-      };
-
-      console.log('Posting food with payload:', payload);
-      const response = await api.post('/food', payload);
-      console.log('Food posted successfully:', response.data);
-
-      toast.success('Food posted successfully!', {
-        description: `You earned ₹${earnings} for this donation.`
       });
 
-      // notify other tabs/pages to refresh provider listings
-      try {
-        localStorage.setItem('refreshProviderListings', String(Date.now()));
-      } catch (e) {
-        // ignore
-      }
+      toast.success('Food posted successfully!', {
+        description: `You earned ₹${getEarnings(quantity[0])} for this donation.`
+      });
 
-      setTimeout(() => {
-        navigate('/provider');
-      }, 1500);
-    } catch (err) {
-      console.error('Error posting food:', err);
-      console.error('Error details:', err instanceof Error ? err.message : String(err));
-      if (err && typeof err === 'object' && 'response' in err) {
-        console.error('Response status:', (err as any).response?.status);
-        console.error('Response data:', (err as any).response?.data);
-      }
-      toast.error('Failed to post food');
+      try { localStorage.setItem('refreshProviderListings', String(Date.now())); } catch (_) { }
+      setTimeout(() => navigate('/provider'), 1500);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to post food. Please try again.');
     }
   };
 
-  if (!roleMatched) return null;
+  if (!user) return null;
+
+  const categories = [
+    { id: 'veg', label: 'Vegetarian', emoji: '🥦', color: 'text-green-600', bg: 'bg-green-50 dark:bg-green-950/30', border: 'border-green-200' },
+    { id: 'non-veg', label: 'Non-Veg', emoji: '🍗', color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-950/30', border: 'border-red-200' },
+    { id: 'vegan', label: 'Vegan', emoji: '🌱', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', border: 'border-emerald-200' },
+    { id: 'mixed', label: 'Mixed', emoji: '🍱', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/30', border: 'border-orange-200' },
+  ];
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
+      {/* Sticky top bar */}
       <header className="bg-background border-b px-4 py-4 sticky top-0 z-10">
         <div className="container mx-auto max-w-2xl flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => {
-                if (step > 1) setStep(step - 1);
-                else navigate('/provider');
-              }}
+              onClick={() => step > 1 ? setStep(step - 1) : navigate('/provider')}
             >
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div>
               <h1 className="text-xl font-bold">Post Surplus Food</h1>
-              <p className="text-xs text-muted-foreground">Step {step} of 4</p>
+              <p className="text-xs text-muted-foreground">Step {step} of 2</p>
             </div>
           </div>
-
-          {/* Progress Indicator */}
-          <div className="flex gap-1">
-            {[1, 2, 3, 4].map((i) => (
+          {/* Progress dots */}
+          <div className="flex gap-2">
+            {[1, 2].map(i => (
               <div
                 key={i}
-                className={`h-1 w-8 rounded-full transition-colors ${i <= step ? 'bg-green-600' : 'bg-muted'}`}
+                className={`h-2 rounded-full transition-all duration-300 ${i <= step ? 'w-8 bg-green-600' : 'w-2 bg-muted'}`}
               />
             ))}
           </div>
@@ -201,288 +148,201 @@ export function PostFoodPage() {
             exit={{ opacity: 0, x: -20 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="border-none shadow-none bg-transparent">
-              <CardContent className="p-0 space-y-8">
+            {/* ── STEP 1: Category + Description ── */}
+            {step === 1 && (
+              <div className="space-y-8">
+                <div>
+                  <h2 className="text-3xl font-bold mb-1">What are you sharing?</h2>
+                  <p className="text-muted-foreground">Pick a category and describe the food</p>
+                </div>
 
-                {/* Step 1: Category */}
-                {step === 1 && (
-                  <div className="space-y-6">
-                    <div className="text-center md:text-left">
-                      <h2 className="text-3xl font-bold mb-2">What type of food?</h2>
-                      <p className="text-muted-foreground">Select a category to help receivers find your post</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      {[
-                        { id: 'veg', label: 'Vegetarian', icon: Leaf, color: 'text-green-600', bg: 'bg-green-50' },
-                        { id: 'non-veg', label: 'Non-Veg', icon: Users, color: 'text-red-600', bg: 'bg-red-50' },
-                        { id: 'vegan', label: 'Vegan', icon: Leaf, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                        { id: 'mixed', label: 'Mixed Combo', icon: Users, color: 'text-orange-600', bg: 'bg-orange-50' },
-                      ].map((cat) => (
-                        <button
-                          key={cat.id}
-                          onClick={() => setFoodCategory(cat.id as any)}
-                          className={`p-6 rounded-2xl border-2 transition-all text-left flex flex-col gap-4 group ${foodCategory === cat.id
-                            ? 'border-green-600 bg-green-50/50 shadow-md ring-1 ring-green-600/20'
-                            : 'border-muted hover:border-muted-foreground/30 bg-card'
-                            }`}
-                        >
-                          <div className={`p-3 rounded-xl w-fit ${cat.bg}`}>
-                            <cat.icon className={`w-6 h-6 ${cat.color}`} />
-                          </div>
-                          <div>
-                            <div className="font-bold">{cat.label}</div>
-                            <p className="text-[10px] text-muted-foreground">Fresh and healthy options</p>
-                          </div>
-                          {foodCategory === cat.id && (
-                            <div className="absolute top-4 right-4 text-green-600 bg-white rounded-full shadow-sm">
-                              <Check className="w-5 h-5" />
-                            </div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-
-                    <Button onClick={() => setStep(2)} className="w-full h-14 bg-green-600 hover:bg-green-700 text-lg font-bold rounded-xl shadow-lg shadow-green-600/20">
-                      Next Step <ChevronRight className="ml-2 w-5 h-5" />
-                    </Button>
-                  </div>
-                )}
-
-                {/* Step 2: Description */}
-                {step === 2 && (
-                  <div className="space-y-6">
-                    <div>
-                      <h2 className="text-3xl font-bold mb-2">Describe the meal</h2>
-                      <p className="text-muted-foreground">Add details to help receivers know what to expect</p>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="description" className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Food Description *</Label>
-                        <Textarea
-                          id="description"
-                          value={description}
-                          onChange={(e) => setDescription(e.target.value)}
-                          placeholder="e.g., 20 Packets of Vegetable Biryani with Raita. Freshly cooked for a canceled event."
-                          className="min-h-[160px] text-lg rounded-xl border-2 focus:border-green-600"
-                        />
-                      </div>
-
-                      <div className="bg-blue-500/5 p-4 rounded-xl border border-blue-500/10 flex gap-3">
-                        <div className="p-2 bg-blue-500 text-white rounded-lg h-fit">
-                          <Leaf className="w-4 h-4" />
-                        </div>
-                        <p className="text-xs text-blue-600/80 leading-relaxed">
-                          <strong>Honesty builds trust:</strong> Briefly mention if the food contains allergens like nuts, soy or dairy to ensure community safety.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-4">
-                      <Button variant="outline" onClick={() => setStep(1)} className="h-14 flex-1 rounded-xl">Back</Button>
-                      <Button onClick={() => setStep(3)} disabled={!description} className="h-14 flex-[2] bg-green-600 hover:bg-green-700 text-lg font-bold rounded-xl shadow-lg shadow-green-600/20">
-                        Continue <ChevronRight className="ml-2 w-5 h-5" />
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Step 3: Quantity & Expiry */}
-                {step === 3 && (
-                  <div className="space-y-8">
-                    <div>
-                      <h2 className="text-3xl font-bold mb-2">Quantity & Expiry</h2>
-                      <p className="text-muted-foreground">How many people can this serve and for how long?</p>
-                    </div>
-
-                    {/* Quantity Selector */}
-                    <div className="space-y-6">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Users className="w-5 h-5 text-green-600" />
-                          <Label className="text-lg font-bold">Serves approx.</Label>
-                        </div>
-                        <div className="text-3xl font-black text-green-600">{quantity[0]} ppl</div>
-                      </div>
-
-                      <Slider
-                        value={quantity}
-                        onValueChange={setQuantity}
-                        min={1}
-                        max={100}
-                        step={1}
-                        className="py-4"
-                      />
-
-                      {/* Points/Earnings Display */}
-                      <div className="bg-gradient-to-r from-green-600 to-green-700 p-6 rounded-2xl text-white shadow-xl relative overflow-hidden group">
-                        <div className="relative z-10 flex items-center justify-between">
-                          <div>
-                            <p className="text-green-100 text-sm font-medium uppercase tracking-widest mb-1">Impact Reward</p>
-                            <h3 className="text-3xl font-black">₹{getEarnings(quantity[0])}</h3>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-green-100/80 mb-1">Status</p>
-                            <div className="bg-white/20 px-3 py-1 rounded-full text-xs font-bold backdrop-blur-sm">
-                              {quantity[0] <= 10 ? 'Standard Contribution' : quantity[0] <= 50 ? 'Community Hero' : 'Impact Champion'}
-                            </div>
-                          </div>
-                        </div>
-                        {/* Decorative background circle */}
-                        <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-white/10 rounded-full group-hover:scale-110 transition-transform duration-700"></div>
-                      </div>
-                    </div>
-
-                    {/* Expiry Selector */}
-                    <div className="space-y-6 pt-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Clock className="w-5 h-5 text-orange-600" />
-                          <Label className="text-lg font-bold">Best before</Label>
-                        </div>
-                        <div className="text-2xl font-bold text-orange-600">{hoursUntilExpiry[0]} hrs</div>
-                      </div>
-
-                      <Slider
-                        value={hoursUntilExpiry}
-                        onValueChange={setHoursUntilExpiry}
-                        min={0.5}
-                        max={12}
-                        step={0.5}
-                        className="py-4"
-                      />
-
-                      <div className="p-4 bg-orange-500/5 rounded-xl border border-orange-500/10 flex gap-3 italic">
-                        <Clock className="w-4 h-4 text-orange-600" />
-                        <p className="text-xs text-orange-700/80">
-                          Receivers must pick up within this timeframe. Short expiry items are prioritized on the map.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-4">
-                      <Button variant="outline" onClick={() => setStep(2)} className="h-14 flex-1 rounded-xl">Back</Button>
-                      <Button onClick={() => setStep(4)} className="h-14 flex-[2] bg-green-600 hover:bg-green-700 text-lg font-bold rounded-xl shadow-lg shadow-green-600/20">
-                        Almost Done <ChevronRight className="ml-2 w-5 h-5" />
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Step 4: Location */}
-                {step === 4 && (
-                  <form onSubmit={handleSubmit} className="space-y-6">
-                    <div>
-                      <h2 className="text-3xl font-bold mb-2">Pickup Location</h2>
-                      <p className="text-muted-foreground">Tell us where the food can be collected</p>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="relative group">
-                        <AddressAutocomplete
-                          defaultValue={address}
-                          onSelect={(loc: LocationResult) => {
-                            setAddress(loc.display_name);
-                            setDetectedLocation({
-                              lat: loc.lat,
-                              lng: loc.lon,
-                              address: loc.display_name
-                            });
-                          }}
-                          placeholder="Search for street, landmark, or area..."
-                        />
-                      </div>
-
-                      <Button
+                {/* Category */}
+                <div>
+                  <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-3 block">
+                    Food Type
+                  </Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {categories.map(cat => (
+                      <button
+                        key={cat.id}
                         type="button"
-                        variant="ghost"
-                        className={`w-full justify-center h-12 rounded-xl text-green-700 font-bold hover:bg-green-50 ${isDetecting ? 'opacity-50' : ''}`}
-                        onClick={handleDetectLocation}
-                        disabled={isDetecting}
+                        onClick={() => setFoodCategory(cat.id as any)}
+                        className={`p-4 rounded-2xl border-2 transition-all text-left flex items-center gap-3 relative ${foodCategory === cat.id
+                            ? `${cat.border} ${cat.bg} shadow-sm ring-1 ring-offset-1 ring-green-600/30`
+                            : 'border-muted hover:border-muted-foreground/30 bg-card'
+                          }`}
                       >
-                        {isDetecting ? (
-                          <span className="flex items-center gap-2">
-                            <div className="w-4 h-4 border-2 border-green-600 border-t-transparent animate-spin rounded-full"></div>
-                            Detecting...
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-2">📍 Use my current location</span>
+                        <span className="text-2xl">{cat.emoji}</span>
+                        <span className={`font-bold text-sm ${foodCategory === cat.id ? cat.color : ''}`}>{cat.label}</span>
+                        {foodCategory === cat.id && (
+                          <Check className="w-4 h-4 text-green-600 absolute top-2.5 right-2.5" />
                         )}
-                      </Button>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-                      {detectedLocation && (
-                        <>
-                          <div className="p-4 bg-muted/30 rounded-xl border flex items-start gap-3">
-                            <div className="p-2 bg-green-600 text-white rounded-lg">
-                              <Check className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
-                                Address Verified
-                              </p>
-                              <p className="text-sm font-medium">{detectedLocation.address}</p>
-                            </div>
-                          </div>
+                {/* Description */}
+                <div className="space-y-2">
+                  <Label htmlFor="description" className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                    Description *
+                  </Label>
+                  <Textarea
+                    id="description"
+                    value={description}
+                    onChange={e => setDescription(e.target.value)}
+                    placeholder="e.g. 20 packets of vegetable biryani, freshly cooked for a cancelled event. No nuts, no dairy."
+                    className="min-h-[140px] text-base rounded-xl border-2 focus:border-green-600 resize-none"
+                  />
+                  <p className="text-xs text-muted-foreground pl-1">
+                    Mention allergens (nuts, dairy, soy) to keep the community safe.
+                  </p>
+                  {description.trim().length > 0 && description.trim().length < 2 && (
+                    <p className="text-xs text-red-500 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> At least 2 characters required
+                    </p>
+                  )}
+                </div>
 
-                          <FoodMap
-                            centerLat={detectedLocation.lat}
-                            centerLng={detectedLocation.lng}
-                            posts={[
-                              {
-                                id: "preview",
-                                foodType:
-                                  description.substring(0, 30) +
-                                  (description.length > 30 ? "..." : "") ||
-                                  "Surplus food",
-                                providerName: "Your pickup point",
-                                location: {
-                                  lat: detectedLocation.lat,
-                                  lng: detectedLocation.lng,
-                                  address: detectedLocation.address,
-                                },
-                                distance: null,
-                              },
-                            ]}
-                          />
-                        </>
-                      )}
+                <Button
+                  onClick={() => setStep(2)}
+                  disabled={!canGoToStep2}
+                  className="w-full h-14 bg-green-600 hover:bg-green-700 text-lg font-bold rounded-xl shadow-lg shadow-green-600/20 disabled:opacity-50"
+                >
+                  Next — Quantity & Location <ChevronRight className="ml-2 w-5 h-5" />
+                </Button>
+              </div>
+            )}
+
+            {/* ── STEP 2: Quantity + Expiry + Location ── */}
+            {step === 2 && (
+              <form onSubmit={handleSubmit} className="space-y-8">
+                <div>
+                  <h2 className="text-3xl font-bold mb-1">Details & Location</h2>
+                  <p className="text-muted-foreground">How many people can it serve, how long is it fresh for, and where?</p>
+                </div>
+
+                {/* Quantity */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="flex items-center gap-2 text-base font-bold">
+                      <Users className="w-5 h-5 text-green-600" /> Serves approx.
+                    </Label>
+                    <span className="text-3xl font-black text-green-600">{quantity[0]} ppl</span>
+                  </div>
+                  <Slider value={quantity} onValueChange={setQuantity} min={1} max={100} step={1} className="py-2" />
+
+                  {/* Earnings card */}
+                  <div className="bg-gradient-to-r from-green-600 to-green-700 p-5 rounded-2xl text-white flex items-center justify-between">
+                    <div>
+                      <p className="text-green-100/80 text-xs font-medium uppercase tracking-widest mb-1">Impact Reward</p>
+                      <p className="text-3xl font-black">₹{getEarnings(quantity[0])}</p>
                     </div>
+                    <div className="text-right">
+                      <p className="text-xs text-green-100/80 mb-1">₹{getRatePerMeal(quantity[0])}/meal</p>
+                      <div className="bg-white/20 px-3 py-1 rounded-full text-xs font-bold">
+                        {quantity[0] <= 10 ? 'Standard' : quantity[0] <= 50 ? 'Community Hero' : 'Impact Champion'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-                    {/* Summary Preview */}
-                    <Card className="bg-muted/50 border-none rounded-2xl p-6 space-y-4">
-                      <h4 className="font-bold text-sm uppercase tracking-wider text-muted-foreground">Post Preview</h4>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted-foreground uppercase font-bold">Category</p>
-                          <p className="text-sm font-bold capitalize">{foodCategory}</p>
+                {/* Expiry */}
+                <div className="space-y-4 pt-2 border-t border-dashed border-muted">
+                  <div className="flex items-center justify-between">
+                    <Label className="flex items-center gap-2 text-base font-bold">
+                      <Clock className="w-5 h-5 text-orange-600" /> Best before
+                    </Label>
+                    <span className="text-2xl font-bold text-orange-600">{hoursUntilExpiry[0]} hrs</span>
+                  </div>
+                  <Slider value={hoursUntilExpiry} onValueChange={setHoursUntilExpiry} min={0.5} max={12} step={0.5} className="py-2" />
+                  <p className="text-xs text-muted-foreground italic">
+                    Receivers must pick up within this window. Shorter expiry items are prioritised on the map.
+                  </p>
+                </div>
+
+                {/* Location */}
+                <div className="space-y-3 pt-2 border-t border-dashed border-muted">
+                  <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Pickup Location *</Label>
+                  <AddressAutocomplete
+                    defaultValue={address}
+                    onSelect={(loc: LocationResult) => {
+                      setAddress(loc.display_name);
+                      setDetectedLocation({ lat: loc.lat, lng: loc.lon, address: loc.display_name });
+                    }}
+                    placeholder="Search for a street, landmark, or area..."
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className={`w-full justify-center h-11 rounded-xl text-green-700 font-bold hover:bg-green-50 dark:hover:bg-green-950/30 ${isDetecting ? 'opacity-50' : ''}`}
+                    onClick={handleDetectLocation}
+                    disabled={isDetecting}
+                  >
+                    {isDetecting
+                      ? <span className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-green-600 border-t-transparent animate-spin rounded-full" />Detecting...</span>
+                      : <span className="flex items-center gap-2">📍 Use my current location</span>
+                    }
+                  </Button>
+
+                  {detectedLocation && (
+                    <>
+                      <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-xl border border-green-200 dark:border-green-900/40 flex items-start gap-3">
+                        <div className="p-1.5 bg-green-600 text-white rounded-lg shrink-0">
+                          <Check className="w-3.5 h-3.5" />
                         </div>
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted-foreground uppercase font-bold">Quantity</p>
-                          <p className="text-sm font-bold">Feeds {quantity[0]} ppl</p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted-foreground uppercase font-bold">Earnings</p>
-                          <p className="text-sm font-bold text-green-600">₹{getEarnings(quantity[0])} (₹{getRatePerMeal(quantity[0])}/meal)</p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted-foreground uppercase font-bold">Expiry</p>
-                          <p className="text-sm font-bold text-orange-600">{hoursUntilExpiry[0]} hours</p>
+                        <div>
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Location Set</p>
+                          <p className="text-sm font-medium">{detectedLocation.address}</p>
                         </div>
                       </div>
-                    </Card>
+                      <FoodMap
+                        centerLat={detectedLocation.lat}
+                        centerLng={detectedLocation.lng}
+                        posts={[{
+                          id: 'preview',
+                          foodType: description.substring(0, 30) + (description.length > 30 ? '...' : '') || 'Your food',
+                          providerName: 'Pickup point',
+                          location: { lat: detectedLocation.lat, lng: detectedLocation.lng, address: detectedLocation.address },
+                          distance: null,
+                        }]}
+                      />
+                    </>
+                  )}
+                </div>
 
-                    <div className="flex gap-4 pt-4">
-                      <Button type="button" variant="outline" onClick={() => setStep(3)} className="h-14 flex-1 rounded-xl">Back</Button>
-                      <Button type="submit" className="h-14 flex-[2] bg-green-600 hover:bg-green-700 text-lg font-bold rounded-xl shadow-lg shadow-green-600/20">
-                        Post Food Now
-                      </Button>
+                {/* Summary */}
+                <Card className="bg-muted/30 border-none rounded-2xl">
+                  <CardContent className="p-5 grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">Category</p>
+                      <p className="text-sm font-bold capitalize">{foodCategory}</p>
                     </div>
-                  </form>
-                )}
+                    <div>
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">Quantity</p>
+                      <p className="text-sm font-bold">Feeds {quantity[0]} ppl</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">Earnings</p>
+                      <p className="text-sm font-bold text-green-600">₹{getEarnings(quantity[0])}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">Expiry</p>
+                      <p className="text-sm font-bold text-orange-600">{hoursUntilExpiry[0]} hours</p>
+                    </div>
+                  </CardContent>
+                </Card>
 
-              </CardContent>
-            </Card>
+                <div className="flex gap-3">
+                  <Button type="button" variant="outline" onClick={() => setStep(1)} className="h-14 flex-1 rounded-xl">
+                    Back
+                  </Button>
+                  <Button type="submit" className="h-14 flex-[2] bg-green-600 hover:bg-green-700 text-lg font-bold rounded-xl shadow-lg shadow-green-600/20">
+                    Post Food Now 🚀
+                  </Button>
+                </div>
+              </form>
+            )}
           </motion.div>
         </AnimatePresence>
       </main>

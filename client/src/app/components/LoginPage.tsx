@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, Navigate, useSearchParams } from 'react-router';
 import { useLocation } from '../hooks/useLocation';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -15,12 +15,14 @@ import { useAuth } from '../context/AuthContext';
 export function LoginPage() {
   const navigate = useNavigate();
   const { detectLocation } = useLocation();
-  const { login } = useAuth();
+  const { login, user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const sessionExpired = searchParams.get('reason') === 'session';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  // Auto-suggest @gmail.com when typing a name without '@'
+  // Auto-suggest @gmail.com — MUST be declared before any early returns (Rules of Hooks)
   const emailSuggestion = useMemo(() => {
     if (email && !email.includes('@') && email.trim().length > 0) {
       return `${email}@gmail.com`;
@@ -28,40 +30,33 @@ export function LoginPage() {
     return '';
   }, [email]);
 
+  // If already logged in, redirect to dashboard
+  if (user) {
+    return <Navigate to={user.role === 'provider' ? '/provider' : '/receiver'} replace />;
+  }
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     try {
-      console.log('Logging in with email:', email);
       const res = await api.post('/auth/login', { email, password });
-      console.log('Login response:', res.data);
-
       const token = res.data.token;
       const user = res.data.user;
 
-      if (!token) {
-        throw new Error('No token in response');
-      }
+      if (!token) throw new Error('No token in response');
 
       const role = user.role || 'receiver';
       login({ id: user._id || user.id, name: user.name, role }, token);
-      console.log('✓ User info stored in AuthContext');
-
       detectLocation(true);
-
       toast.success('Login successful!');
       navigate(role === 'provider' ? '/provider' : '/receiver');
     } catch (err: any) {
-      console.error('Login error:', err);
-      // Give a more user friendly inline error
       const errorMsg = err?.response?.data?.message || err.message || 'Login failed';
-
       if (errorMsg.includes('Invalid') || errorMsg.includes('password') || errorMsg.includes('email') || err.response?.status === 400 || err.response?.status === 401) {
         setError('This email or password is incorrect. Please try again.');
       } else {
         setError(errorMsg);
       }
-
       toast.error('Login failed');
     }
   };
@@ -150,6 +145,16 @@ export function LoginPage() {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
+            {sessionExpired && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-xl flex items-start gap-3 text-amber-700 dark:text-amber-400"
+              >
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <p className="text-sm font-medium">Your session expired or was invalid — please sign in again.</p>
+              </motion.div>
+            )}
             {error && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}

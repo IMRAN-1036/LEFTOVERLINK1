@@ -88,10 +88,25 @@ const updatePaymentHandler = async (req, res, next) => {
   }
 };
 
+const deleteOrderHandler = async (req, res, next) => {
+  try {
+    const order = await orderService.findOrderById(req.params.id);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    if (order.providerId?.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Not your order" });
+    }
+    await orderService.deleteOrder(req.params.id);
+    return res.json({ success: true });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   createOrderHandler,
   getMyOrdersHandler,
   getProviderOrdersHandler,
   updateStatusHandler,
   updatePaymentHandler,
+  deleteOrderHandler,
 };

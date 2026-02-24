@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams, Navigate } from 'react-router';
+import { useAuth } from '../context/AuthContext';
 import { useLocation } from '../hooks/useLocation';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -13,6 +14,7 @@ import { toast } from 'sonner';
 export function SignupPage() {
   const navigate = useNavigate();
   const { detectLocation } = useLocation();
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const roleFromUrl = searchParams.get('role') as 'provider' | 'receiver' | null;
 
@@ -23,6 +25,11 @@ export function SignupPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+
+  // Redirect already-logged-in users
+  if (user) {
+    return <Navigate to={user.role === 'provider' ? '/provider' : '/receiver'} replace />;
+  }
 
   // Auto-suggest @gmail.com when typing a name without '@'
   const emailSuggestion = useMemo(() => {
@@ -40,24 +47,12 @@ export function SignupPage() {
         setError('Passwords do not match.');
         return;
       }
-
-      console.log('Signing up with email:', email);
-      const res = await api.post('/auth/register', {
-        name,
-        email,
-        password,
-        role,
-      });
-      console.log('Signup response:', res.data);
-
+      await api.post('/auth/register', { name, email, password, role });
       toast.success('Account created successfully!');
-      // Redirect to login page
       navigate(`/login?role=${role}`);
     } catch (err: any) {
-      console.error('Signup error:', err);
       const status = err?.response?.status;
       const serverMsg = err?.response?.data?.message || err?.response?.data?.error?.message || '';
-
       if (status === 409 || serverMsg.toLowerCase().includes('already in use')) {
         setError('This email is already registered. Please sign in instead.');
       } else if (serverMsg) {
@@ -65,7 +60,6 @@ export function SignupPage() {
       } else {
         setError(err instanceof Error ? err.message : 'Signup failed. Please try again.');
       }
-
       toast.error('Signup failed');
     }
   };

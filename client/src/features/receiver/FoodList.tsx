@@ -52,7 +52,8 @@ export function FoodList({ posts, onSelectPost, onContinuePayment, onOpenChat, o
             }
         };
         loadOrders();
-        const interval = setInterval(loadOrders, 5000);
+        // Poll every 60s — orders don't change second-to-second, 5s was causing 429 rate limit errors
+        const interval = setInterval(loadOrders, 60000);
         return () => clearInterval(interval);
     }, []);
 

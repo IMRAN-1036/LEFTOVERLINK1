@@ -2,17 +2,20 @@ import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Header } from './Header';
-import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, MessageCircle, Info } from 'lucide-react';
+import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, MessageCircle, Info, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { formatDistanceToNow } from 'date-fns';
 import { ChatDialog } from './ChatDialog';
+import { useAuth } from '../context/AuthContext';
 
 export function MyOrdersPage() {
     const navigate = useNavigate();
+    const { user } = useAuth();
     const [orders, setOrders] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState('');
 
     // Chat States
     const [isChatOpen, setIsChatOpen] = useState(false);
@@ -24,7 +27,8 @@ export function MyOrdersPage() {
                 const res = await api.get('/orders/mine');
                 setOrders(res.data);
             } catch (err) {
-                console.error("Failed to load orders", err);
+                setError('Could not load orders. Please check your connection.');
+                console.error('Failed to load orders', err);
             } finally {
                 setIsLoading(false);
             }
@@ -65,6 +69,13 @@ export function MyOrdersPage() {
                         <Loader2 className="w-10 h-10 text-green-600 animate-spin mb-4" />
                         <p className="text-lg font-medium text-muted-foreground animate-pulse">Loading your orders...</p>
                     </div>
+                ) : error ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-red-200 shadow-sm min-h-[400px]">
+                        <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
+                        <h2 className="text-xl font-bold mb-2">Could not load orders</h2>
+                        <p className="text-muted-foreground max-w-sm mb-6">{error}</p>
+                        <Button variant="outline" onClick={() => window.location.reload()}>Try Again</Button>
+                    </div>
                 ) : orders.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-border/50 shadow-sm min-h-[400px]">
                         <div className="w-24 h-24 mb-6 rounded-full bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
@@ -99,11 +110,35 @@ export function MyOrdersPage() {
                                         <div className="flex-1 space-y-4">
                                             <div className="flex items-start justify-between">
                                                 <div>
-                                                    <div className="flex items-center gap-3 mb-1">
+                                                    <div className="flex items-center gap-3 mb-1 flex-wrap">
                                                         <h3 className="text-xl font-bold">{order.foodType || 'Food Donation'}</h3>
-                                                        <Badge variant="outline" className={`${order.paymentStatus === 'completed' ? 'border-green-500 text-green-600 bg-green-50 dark:bg-green-500/10' : 'border-orange-500 text-orange-600 bg-orange-50 dark:bg-orange-500/10'}`}>
+                                                        {/* Payment status */}
+                                                        <Badge variant="outline" className={`${order.paymentStatus === 'completed' ? 'border-green-500 text-green-600 bg-green-50 dark:bg-green-500/10' : 'border-orange-500 text-orange-600 bg-orange-50 dark:bg-orange-500/10'
+                                                            }`}>
                                                             {order.paymentStatus === 'completed' ? 'Paid' : 'Payment Pending'}
                                                         </Badge>
+                                                        {/* Request status */}
+                                                        {order.requestStatus === 'pending' && (
+                                                            <Badge variant="outline" className="border-slate-400 text-slate-600 bg-slate-50 dark:bg-slate-800/50">
+                                                                ⏳ Awaiting Response
+                                                            </Badge>
+                                                        )}
+                                                        {order.requestStatus === 'declined' && (
+                                                            <Badge variant="outline" className="border-red-400 text-red-600 bg-red-50 dark:bg-red-900/20">
+                                                                ✗ Declined
+                                                            </Badge>
+                                                        )}
+                                                        {order.requestStatus === 'accepted' && order.paymentStatus !== 'completed' && (
+                                                            <Badge variant="outline" className="border-amber-400 text-amber-700 bg-amber-50 dark:bg-amber-900/20">
+                                                                ✓ Accepted — Pick up soon
+                                                            </Badge>
+                                                        )}
+                                                        {/* Expiry warning */}
+                                                        {order.requestExpiry && order.requestStatus === 'pending' && new Date(order.requestExpiry) < new Date() && (
+                                                            <Badge variant="outline" className="border-red-500 text-red-600 bg-red-50 dark:bg-red-900/20">
+                                                                ⚠ Request Expired
+                                                            </Badge>
+                                                        )}
                                                     </div>
                                                     <p className="text-muted-foreground font-medium flex items-center gap-1.5 text-sm">
                                                         <MapPin className="w-4 h-4 text-green-600" />

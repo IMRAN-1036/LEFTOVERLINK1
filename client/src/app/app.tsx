@@ -24,14 +24,15 @@ import { WalletPage } from './components/WalletPage';
 import { ProviderWalletPage } from './components/ProviderWalletPage';
 import { ProviderMapPage } from './components/ProviderMapPage';
 import { GlobalChatWidget } from './components/GlobalChatWidget';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { useAuth } from './context/AuthContext';
 
+/** Redirects logged-in users to their role's dashboard, visitors to /login */
 const DashboardRedirect = () => {
-  const userStr = localStorage.getItem('user');
-  if (userStr) {
-    const user = JSON.parse(userStr);
-    return <Navigate to={user.role === 'provider' ? '/provider' : '/receiver'} replace />;
-  }
-  return <Navigate to="/login" replace />;
+  const { user, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (!user) return <Navigate to="/login" replace />;
+  return <Navigate to={user.role === 'provider' ? '/provider' : '/receiver'} replace />;
 };
 
 export default function App() {
@@ -40,29 +41,40 @@ export default function App() {
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <div className="size-full">
           <Routes>
+            {/* Public routes */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/dashboard" element={<DashboardRedirect />} />
-            <Route path="/provider" element={<ProviderDashboard />} />
-            <Route path="/provider/map" element={<ProviderMapPage />} />
-            <Route path="/receiver" element={<ReceiverDashboard />} />
-            <Route path="/my-orders" element={<MyOrdersPage />} />
-            <Route path="/provider-orders" element={<ProviderOrdersPage />} />
-            <Route path="/provider-requests" element={<ProviderRequestsPage />} />
-            <Route path="/post-food" element={<PostFoodPage />} />
-            <Route path="/my-listings" element={<MyListingsPage />} />
-            <Route path="/history" element={<PickupHistoryPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/faq" element={<FAQPage />} />
             <Route path="/disclaimer" element={<FoodHygieneDisclaimerPage />} />
-            <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/donate" element={<DonationPage />} />
-            <Route path="/wallet" element={<WalletPage />} />
-            <Route path="/provider-wallet" element={<ProviderWalletPage />} />
-            <Route path="/pickup-confirmation" element={<PickupConfirmationPage />} />
+
+            {/* Role-agnostic redirect */}
+            <Route path="/dashboard" element={<DashboardRedirect />} />
+
+            {/* Provider-only routes */}
+            <Route path="/provider" element={<ProtectedRoute role="provider"><ProviderDashboard /></ProtectedRoute>} />
+            <Route path="/provider/map" element={<ProtectedRoute role="provider"><ProviderMapPage /></ProtectedRoute>} />
+            <Route path="/provider-orders" element={<ProtectedRoute role="provider"><ProviderOrdersPage /></ProtectedRoute>} />
+            <Route path="/provider-requests" element={<ProtectedRoute role="provider"><ProviderRequestsPage /></ProtectedRoute>} />
+            <Route path="/post-food" element={<ProtectedRoute role="provider"><PostFoodPage /></ProtectedRoute>} />
+            <Route path="/my-listings" element={<ProtectedRoute role="provider"><MyListingsPage /></ProtectedRoute>} />
+            <Route path="/provider-wallet" element={<ProtectedRoute role="provider"><ProviderWalletPage /></ProtectedRoute>} />
+
+            {/* Receiver-only routes */}
+            <Route path="/receiver" element={<ProtectedRoute role="receiver"><ReceiverDashboard /></ProtectedRoute>} />
+            <Route path="/my-orders" element={<ProtectedRoute role="receiver"><MyOrdersPage /></ProtectedRoute>} />
+            <Route path="/wallet" element={<ProtectedRoute role="receiver"><WalletPage /></ProtectedRoute>} />
+            <Route path="/pickup-confirmation" element={<ProtectedRoute role="receiver"><PickupConfirmationPage /></ProtectedRoute>} />
+
+            {/* Authenticated (any role) routes */}
+            <Route path="/history" element={<ProtectedRoute><PickupHistoryPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+            <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+
+            {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Toaster position="top-right" />

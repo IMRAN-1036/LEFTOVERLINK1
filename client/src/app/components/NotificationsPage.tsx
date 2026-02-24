@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { Bell, Clock, MapPin, CheckCircle, AlertCircle, Trash2, X } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Bell, Clock, MapPin, CheckCircle, AlertCircle, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Header } from './Header';
+import api from '../api/axios';
 
 interface Notification {
   id: string;
@@ -15,226 +17,209 @@ interface Notification {
   time: string;
   read: boolean;
   actionable?: boolean;
+  link?: string;
 }
 
 export function NotificationsPage() {
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: '1',
-      type: 'nearby',
-      title: 'ready to make difference???',
-      message: 'your kichen has extra meals.someone nearby is waiting',
-      time: '2 minutes ago',
-      read: false,
-      actionable: true,
-    },
-    {
-      id: '2',
-      type: 'expiring',
-      title: 'every meal shared matters',
-      message: 'your donation can feed families today...post it before it expires.',
-      time: '15 minutes ago',
-      read: false,
-      actionable: true,
-    },
-    {
-      id: '3',
-      type: 'expiring',
-      title: 'meal Alrert:Act fast!!!',
-      message: 'Fresh food within 1km .pickup avaliable for the next 2 hours.',
-      time: '1 hour ago',
-      read: true,
-    },
-    {
-      id: '4',
-      type: 'system',
-      title: 'Community needs you',
-      message: 'new food isting near your area.help redirect it to those in need.',
-      time: '3 hours ago',
-      read: true,
-    },
-    {
-      id: '5',
-      type: 'pickup',
-      title: 'you made an impact !',
-      message: 'Thank you to you,from saving meals from waste!',
-      time: '1 day ago',
-      read: true,
-    },
-  ]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await api.get('/notifications');
+        if (res.data?.success) {
+          setNotifications(res.data.data);
+        }
+      } catch (err) {
+        setError('Could not load notifications. Check your connection.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    load();
+  }, []);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const markAsRead = (id: string) => {
-    setNotifications(notifications.map(n =>
-      n.id === id ? { ...n, read: true } : n
-    ));
-  };
+  const markAsRead = (id: string) =>
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
 
-  const markAllAsRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })));
-  };
+  const markAllAsRead = () =>
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
 
-  const deleteNotification = (id: string) => {
-    setNotifications(notifications.filter(n => n.id !== id));
-  };
+  const deleteNotification = (id: string) =>
+    setNotifications(prev => prev.filter(n => n.id !== id));
 
-  const getNotificationIcon = (type: string) => {
+  const getIcon = (type: string) => {
     switch (type) {
-      case 'nearby':
-        return <MapPin className="w-5 h-5 text-green-600" />;
-      case 'expiring':
-        return <Clock className="w-5 h-5 text-red-600" />;
-      case 'pickup':
-        return <CheckCircle className="w-5 h-5 text-blue-600" />;
-      default:
-        return <AlertCircle className="w-5 h-5 text-muted-foreground" />;
+      case 'nearby': return <MapPin className="w-5 h-5 text-green-600" />;
+      case 'expiring': return <Clock className="w-5 h-5 text-red-600" />;
+      case 'pickup': return <CheckCircle className="w-5 h-5 text-blue-600" />;
+      default: return <AlertCircle className="w-5 h-5 text-muted-foreground" />;
     }
   };
 
-  const NotificationCard = ({ notification }: { notification: Notification }) => (
-    <Card
-      className={`p-4 ${!notification.read ? 'bg-green-500/10 border-green-500/20' : ''}`}
-      onClick={() => markAsRead(notification.id)}
+  const NotificationCard = ({ n }: { n: Notification }) => (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, height: 0 }}
     >
-      <div className="flex gap-3">
-        <div className="mt-1">{getNotificationIcon(notification.type)}</div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1">
-              <h3 className="font-medium text-sm">{notification.title}</h3>
-              {!notification.read && (
-                <Badge variant="default" className="bg-green-600 text-xs ml-2">
-                  New
-                </Badge>
-              )}
+      <Card
+        className={`p-4 cursor-pointer transition-colors ${!n.read ? 'bg-green-500/10 border-green-500/20 dark:border-green-800/30' : 'hover:bg-muted/40'}`}
+        onClick={() => markAsRead(n.id)}
+      >
+        <div className="flex gap-3">
+          <div className="mt-0.5 shrink-0">{getIcon(n.type)}</div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <h3 className="font-semibold text-sm leading-tight">{n.title}</h3>
+                {!n.read && <Badge className="bg-green-600 text-[10px] px-1.5 py-0 shrink-0">New</Badge>}
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); deleteNotification(n.id); }}
+                className="text-muted-foreground/40 hover:text-red-500 transition-colors shrink-0"
+                aria-label="Delete notification"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                deleteNotification(notification.id);
-              }}
-              className="text-muted-foreground hover:text-red-500 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
-          <p className="text-sm text-muted-foreground mt-1">{notification.message}</p>
-          <p className="text-xs text-muted-foreground/60 mt-2">{notification.time}</p>
+            <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{n.message}</p>
+            <p className="text-xs text-muted-foreground/50 mt-1.5">{n.time}</p>
 
-          {notification.actionable && !notification.read && (
-            <div className="flex gap-2 mt-3">
-              <Button
-                size="sm"
-                className="bg-green-600 hover:bg-green-700"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate('/dashboard');
-                }}
-              >
-                View Details
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  markAsRead(notification.id);
-                }}
-              >
-                Dismiss
-              </Button>
-            </div>
-          )}
+            {n.actionable && n.link && !n.read && (
+              <div className="flex gap-2 mt-3">
+                <Button
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-700 h-8 text-xs px-3"
+                  onClick={(e) => { e.stopPropagation(); navigate(n.link!); }}
+                >
+                  View
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs px-3"
+                  onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </Card>
+    </motion.div>
+  );
+
+  const EmptyState = ({ label }: { label: string }) => (
+    <Card className="p-10 text-center bg-card border-dashed">
+      <Bell className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />
+      <p className="text-muted-foreground text-sm">{label}</p>
     </Card>
   );
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="bg-background border-b sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-3">
-              <motion.button
-                whileHover={{ scale: 1.1, rotate: 90 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={() => navigate('/dashboard')}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-red-50 text-red-500 hover:bg-red-500 hover:text-white hover:shadow-lg hover:shadow-red-500/30 transition-all duration-300 border border-red-100 group"
-                aria-label="Close Notifications"
-              >
-                <X className="w-5 h-5 drop-shadow-sm group-hover:scale-110 transition-transform" />
-              </motion.button>
-              <div className="flex items-center gap-2">
-                <Bell className="w-5 h-5" />
-                <h1 className="text-xl font-bold">Notifications</h1>
+    <div className="min-h-screen bg-slate-50 dark:bg-zinc-950">
+      <Header />
+      <main className="max-w-2xl mx-auto px-4 py-8 mt-20">
+        {/* Page header */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full hover:bg-slate-200 dark:hover:bg-zinc-800"
+              onClick={() => navigate(-1)}
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-black flex items-center gap-2">
+                <Bell className="w-6 h-6 text-green-600" />
+                Notifications
                 {unreadCount > 0 && (
-                  <Badge className="bg-red-500">{unreadCount}</Badge>
+                  <Badge className="bg-red-500 text-xs">{unreadCount}</Badge>
                 )}
-              </div>
+              </h1>
+              <p className="text-sm text-muted-foreground mt-0.5">Updates from your food activity</p>
             </div>
-            {unreadCount > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={markAllAsRead}
-              >
-                Mark all as read
-              </Button>
-            )}
           </div>
+          {unreadCount > 0 && (
+            <Button variant="ghost" size="sm" onClick={markAllAsRead} className="text-sm shrink-0">
+              Mark all read
+            </Button>
+          )}
         </div>
-      </div>
 
-      <div className="max-w-4xl mx-auto p-4 pb-20">
-        <Tabs defaultValue="all" className="w-full">
-          <TabsList className="w-full grid grid-cols-4">
-            <TabsTrigger value="all">
-              All
-              {unreadCount > 0 && (
-                <Badge className="ml-2 bg-red-500 text-xs">{unreadCount}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="nearby">Nearby</TabsTrigger>
-            <TabsTrigger value="pickups">Pickups</TabsTrigger>
-            <TabsTrigger value="system">System</TabsTrigger>
-          </TabsList>
+        {/* Loading */}
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center min-h-[300px] gap-3 text-muted-foreground">
+            <Loader2 className="w-8 h-8 animate-spin text-green-600" />
+            <p className="text-sm">Loading notifications...</p>
+          </div>
+        ) : error ? (
+          <Card className="p-8 text-center border-red-200 bg-red-50 dark:bg-red-900/10">
+            <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-2" />
+            <p className="text-sm text-red-600">{error}</p>
+            <Button size="sm" variant="outline" className="mt-4" onClick={() => window.location.reload()}>
+              Try again
+            </Button>
+          </Card>
+        ) : (
+          <Tabs defaultValue="all" className="w-full">
+            <TabsList className="w-full grid grid-cols-4 mb-4">
+              <TabsTrigger value="all">
+                All {unreadCount > 0 && <Badge className="ml-1.5 bg-red-500 text-[10px] px-1.5">{unreadCount}</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="nearby">Nearby</TabsTrigger>
+              <TabsTrigger value="pickups">Pickups</TabsTrigger>
+              <TabsTrigger value="system">System</TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="all" className="space-y-3 mt-4">
-            {notifications.length === 0 ? (
-              <Card className="p-8 text-center bg-card">
-                <Bell className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
-                <p className="text-muted-foreground">No notifications yet</p>
-              </Card>
-            ) : (
-              notifications.map(notification => (
-                <NotificationCard key={notification.id} notification={notification} />
-              ))
-            )}
-          </TabsContent>
+            <TabsContent value="all" className="space-y-2">
+              <AnimatePresence mode="popLayout">
+                {notifications.length === 0
+                  ? <EmptyState label="No notifications yet — start using the app to see activity here." />
+                  : notifications.map(n => <NotificationCard key={n.id} n={n} />)
+                }
+              </AnimatePresence>
+            </TabsContent>
 
-          <TabsContent value="nearby" className="space-y-3 mt-4">
-            {notifications.filter(n => n.type === 'nearby').map(notification => (
-              <NotificationCard key={notification.id} notification={notification} />
-            ))}
-          </TabsContent>
+            <TabsContent value="nearby" className="space-y-2">
+              <AnimatePresence mode="popLayout">
+                {notifications.filter(n => n.type === 'nearby').length === 0
+                  ? <EmptyState label="No nearby alerts" />
+                  : notifications.filter(n => n.type === 'nearby').map(n => <NotificationCard key={n.id} n={n} />)
+                }
+              </AnimatePresence>
+            </TabsContent>
 
-          <TabsContent value="pickups" className="space-y-3 mt-4">
-            {notifications.filter(n => n.type === 'pickup' || n.type === 'expiring').map(notification => (
-              <NotificationCard key={notification.id} notification={notification} />
-            ))}
-          </TabsContent>
+            <TabsContent value="pickups" className="space-y-2">
+              <AnimatePresence mode="popLayout">
+                {notifications.filter(n => n.type === 'pickup' || n.type === 'expiring').length === 0
+                  ? <EmptyState label="No pickup updates" />
+                  : notifications.filter(n => n.type === 'pickup' || n.type === 'expiring').map(n => <NotificationCard key={n.id} n={n} />)
+                }
+              </AnimatePresence>
+            </TabsContent>
 
-          <TabsContent value="system" className="space-y-3 mt-4">
-            {notifications.filter(n => n.type === 'system').map(notification => (
-              <NotificationCard key={notification.id} notification={notification} />
-            ))}
-          </TabsContent>
-        </Tabs>
-      </div>
-    </div >
+            <TabsContent value="system" className="space-y-2">
+              <AnimatePresence mode="popLayout">
+                {notifications.filter(n => n.type === 'system').length === 0
+                  ? <EmptyState label="No system messages" />
+                  : notifications.filter(n => n.type === 'system').map(n => <NotificationCard key={n.id} n={n} />)
+                }
+              </AnimatePresence>
+            </TabsContent>
+          </Tabs>
+        )}
+      </main>
+    </div>
   );
 }

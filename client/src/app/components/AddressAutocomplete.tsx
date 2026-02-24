@@ -64,12 +64,21 @@ export function AddressAutocomplete({ onSelect, defaultValue = '', placeholder =
                     setIsOpen(true);
                     setSelectedIndex(-1);
                 } else {
-                    setError('Failed to fetch location data');
+                    setError('No results found. Try a different search.');
                     setResults([]);
                 }
-            } catch (err) {
-                console.error('Location search error:', err);
-                setError('Error connecting to location service');
+            } catch (err: any) {
+                const status = err?.response?.status;
+                const isTimeout = err?.code === 'ECONNABORTED' || err?.message?.includes('timeout');
+                if (status === 429) {
+                    setError('Too many searches — please slow down a bit');
+                } else if (isTimeout) {
+                    setError('Location search timed out, please try again');
+                } else if (status >= 500) {
+                    setError('Location service unavailable, try again shortly');
+                } else {
+                    setError('Could not search location. Check your connection.');
+                }
                 setResults([]);
             } finally {
                 setIsLoading(false);

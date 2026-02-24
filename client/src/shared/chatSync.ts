@@ -67,7 +67,7 @@ export const chatSyncService = {
         };
 
         fetchMessages(); // initial grab
-        pollingIntervals[orderId] = setInterval(fetchMessages, 2000); // Poll every 2 seconds
+        pollingIntervals[orderId] = setInterval(fetchMessages, 5000); // Poll every 5s
     },
 
     /**
@@ -105,7 +105,7 @@ export const chatSyncService = {
         };
 
         checkUnread();
-        globalPollingInterval = setInterval(checkUnread, 5000); // Poll every 5 seconds
+        globalPollingInterval = setInterval(checkUnread, 30000); // Poll every 30s for unread badge
     },
 
     stopGlobalPolling: () => {

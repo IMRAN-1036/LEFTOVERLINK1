@@ -2,15 +2,15 @@ import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Header } from './Header';
-import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, Info, Users, ClipboardList, CheckCircle2, XCircle, Navigation, MessageCircle } from 'lucide-react';
+import { ShoppingBag, ArrowLeft, Clock, MapPin, Loader2, Info, Users, ClipboardList, CheckCircle2, XCircle, Navigation, MessageCircle, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { formatDistanceToNow } from 'date-fns';
+import { useAuth } from '../context/AuthContext';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useAuth } from '../context/AuthContext';
 import {
     Dialog,
     DialogContent,
@@ -29,6 +29,7 @@ export function ProviderRequestsPage() {
     const { user } = useAuth();
     const [orders, setOrders] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState('');
 
 
 
@@ -52,7 +53,8 @@ export function ProviderRequestsPage() {
                 );
                 setOrders(active);
             } catch (err) {
-                console.error("Failed to load orders", err);
+                setError('Could not load requests. Please check your connection.');
+                console.error('Failed to load orders', err);
             } finally {
                 setIsLoading(false);
             }
@@ -122,22 +124,29 @@ export function ProviderRequestsPage() {
                 {isLoading ? (
                     <div className="flex-1 flex flex-col items-center justify-center min-h-[400px]">
                         <Loader2 className="w-10 h-10 text-green-600 animate-spin mb-4" />
-                        <p className="text-lg font-medium text-muted-foreground animate-pulse">Loading your history...</p>
+                        <p className="text-lg font-medium text-muted-foreground animate-pulse">Loading incoming requests...</p>
+                    </div>
+                ) : error ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-red-200 shadow-sm min-h-[400px]">
+                        <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
+                        <h2 className="text-xl font-bold mb-2">Could not load requests</h2>
+                        <p className="text-muted-foreground max-w-sm mb-6">{error}</p>
+                        <Button variant="outline" onClick={() => window.location.reload()}>Try Again</Button>
                     </div>
                 ) : orders.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-border/50 shadow-sm min-h-[400px]">
                         <div className="w-24 h-24 mb-6 rounded-full bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
-                            <Users className="w-12 h-12 text-green-600 opacity-50" />
+                            <ClipboardList className="w-12 h-12 text-green-600 opacity-50" />
                         </div>
-                        <h2 className="text-2xl font-bold mb-2">No completed orders yet</h2>
+                        <h2 className="text-2xl font-bold mb-2">No pending requests</h2>
                         <p className="text-muted-foreground max-w-md mb-8">
-                            When receivers claim your food donations, their pickup history will appear here.
+                            When receivers claim your food donations, their pickup requests will appear here for review.
                         </p>
                         <Button
                             className="bg-green-600 hover:bg-green-700 text-white rounded-full px-8 h-12 font-bold shadow-lg shadow-green-600/20 hover:scale-105 transition-all"
-                            onClick={() => navigate('/provider')}
+                            onClick={() => navigate('/post-food')}
                         >
-                            Return to Dashboard
+                            Post Food Donation
                         </Button>
                     </div>
                 ) : (

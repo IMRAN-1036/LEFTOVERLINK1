@@ -5,6 +5,7 @@ const analyticsRoutes = require("../modules/analytics/analytics.routes");
 const chatRoutes = require("../modules/chat/chat.routes");
 const orderRoutes = require("../modules/order/order.routes");
 const walletRoutes = require("../modules/wallet/wallet.routes");
+const notificationsRoutes = require("../modules/notifications/notifications.routes");
 
 const { authRateLimiter } = require("../middleware/rateLimiter");
 
@@ -16,6 +17,7 @@ const registerRoutes = (app) => {
   app.use("/api/chat", chatRoutes);
   app.use("/api/orders", orderRoutes);
   app.use("/api/wallet", walletRoutes);
+  app.use("/api/notifications", notificationsRoutes);
 
   // Placeholder modules for future expansion:
   // app.use("/api/pickups", pickupRoutes);
